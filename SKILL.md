@@ -31,6 +31,7 @@ node <skill>/scripts/board.mjs init --dir .temp/bord --session "<セッション
 ## 判断を足す
 
 `references/question-template.md` の型で、1 件につき 1 つの判断を `item.json` にします。すべての型に自由記入欄が付くので、「その他」は作りません。
+推奨があるときは `answer.recommended` に値を入れる（回答者は何も選ばずに「推奨」で送れる）
 
 | 聞くこと | `answer.type` | 値 |
 |---|---|---|

@@ -29,6 +29,8 @@
 
 すべての型に自由記入欄が付きます。「その他」を選択肢にはしません。`choice` と `multi` の選択肢は2個以上にします。
 
+推奨がある場合は `answer.recommended` に、`value` と同じ形の値を指定します。`choice` は選択肢の `value`、`multi` は値の配列、`rating`・`scale`・`number` は数、`yesno` は `true` または `false` を入れます。`text` 型には指定できません。
+
 ## 完全な例: choice
 
 ```json

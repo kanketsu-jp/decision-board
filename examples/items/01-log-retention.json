@@ -15,6 +15,7 @@
   ],
   "answer": {
     "type": "choice",
+    "recommended": "30",
     "prompt": "標準の保存期間を選んでください。",
     "options": [
       { "value": "7", "label": "7日", "hint": "最小構成" },

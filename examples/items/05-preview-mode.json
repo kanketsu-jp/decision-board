@@ -10,6 +10,7 @@
   ],
   "answer": {
     "type": "yesno",
+    "recommended": true,
     "yesLabel": "必須にする",
     "noLabel": "必須にしない",
     "prompt": "確認画面を必須にしますか。"

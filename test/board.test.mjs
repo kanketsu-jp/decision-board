@@ -158,3 +158,151 @@ test('CLI と受け口の受入', async () => {
     await fs.rm(dir, { recursive: true, force: true });
   }
 });
+
+test('自由記入だけの回答と未回答値の受け入れ', async () => {
+  const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'bord-board-'));
+  let serverProcess;
+  try {
+    const items = [
+      { title: '選択肢への自由記入', sections: [], answer: { type: 'choice', options: [{ value: 'a', label: '案A' }, { value: 'b', label: '案B' }] } },
+      { title: '空の選択肢回答', sections: [], answer: { type: 'choice', options: [{ value: 'a', label: '案A' }] } },
+      { title: '評価への自由記入', sections: [], answer: { type: 'rating', max: 5 } },
+      { title: '複数選択の途中値', sections: [], answer: { type: 'multi', min: 2, options: [{ value: 'a', label: '案A' }, { value: 'b', label: '案B' }] } },
+      { title: '値キー無しの回答', sections: [], answer: { type: 'choice', options: [{ value: 'a', label: '案A' }] } },
+      { title: '自由記入型', sections: [], answer: { type: 'text' } },
+    ];
+    let result = run(['init', '--dir', dir, '--session', '自由記入試験', '--cwd', dir]);
+    assert.equal(result.status, 0, result.stderr);
+    for (const [index, item] of items.entries()) {
+      const itemPath = path.join(dir, `item-${index + 1}.json`);
+      await fs.writeFile(itemPath, JSON.stringify(item));
+      result = run(['add', '--dir', dir, '--file', itemPath]);
+      assert.equal(result.status, 0, result.stderr);
+    }
+
+    const server = await startServer(dir);
+    serverProcess = server.child;
+    const port = server.meta.port;
+    let response = await request(port, '/api/answer', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ id: 'q-1', value: null, note: '理由だけ書く' }) });
+    assert.equal(response.status, 200, response.body);
+    let answerResponse = JSON.parse(response.body);
+    assert.equal(answerResponse.item.status, 'answered');
+    assert.equal(answerResponse.item.response.value, null);
+    assert.match(answerResponse.message, /自由記入のみ/);
+
+    response = await request(port, '/api/answer', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ id: 'q-2', value: null, note: '  ' }) });
+    assert.equal(response.status, 400);
+    assert.match(response.body, /回答か自由記入を入力してください/);
+
+    response = await request(port, '/api/answer', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ id: 'q-3', value: null, note: '評価の理由' }) });
+    assert.equal(response.status, 200, response.body);
+    answerResponse = JSON.parse(response.body);
+    assert.equal(answerResponse.item.response.value, null);
+
+    response = await request(port, '/api/answer', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ id: 'q-4', value: ['a'], note: '理由あり' }) });
+    assert.equal(response.status, 400);
+    assert.match(response.body, /選択数が範囲外です/);
+
+    response = await request(port, '/api/answer', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ id: 'q-5', note: '値は未回答' }) });
+    assert.equal(response.status, 200, response.body);
+    answerResponse = JSON.parse(response.body);
+    assert.equal(answerResponse.item.response.value, null);
+
+    response = await request(port, '/api/answer', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ id: 'q-6', value: null, note: '  ' }) });
+    assert.equal(response.status, 400);
+    assert.match(response.body, /自由記入を入力してください/);
+  } finally {
+    if (serverProcess && !serverProcess.killed) {
+      serverProcess.kill('SIGTERM');
+      await new Promise((resolve) => serverProcess.once('exit', resolve));
+    }
+    await fs.rm(dir, { recursive: true, force: true });
+  }
+});
+
+test('推奨値の検証と推奨送信', async () => {
+  const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'bord-board-'));
+  let serverProcess;
+  try {
+    let result = run(['init', '--dir', dir, '--session', '推奨試験', '--cwd', dir]);
+    assert.equal(result.status, 0, result.stderr);
+    const invalidItems = [
+      { title: '存在しない推奨', sections: [], answer: { type: 'choice', options: [{ value: 'a', label: '案A' }, { value: 'b', label: '案B' }], recommended: 'missing' } },
+      { title: '自由記入の推奨', sections: [], answer: { type: 'text', recommended: '値' } },
+      { title: 'null の推奨', sections: [], answer: { type: 'choice', options: [{ value: 'a', label: '案A' }, { value: 'b', label: '案B' }], recommended: null } },
+      { title: '空配列の推奨', sections: [], answer: { type: 'multi', options: [{ value: 'a', label: '案A' }, { value: 'b', label: '案B' }], recommended: [] } },
+      { title: '重複配列の推奨', sections: [], answer: { type: 'multi', options: [{ value: 'a', label: '案A' }, { value: 'b', label: '案B' }], recommended: ['a', 'a'] } },
+    ];
+    for (const [index, item] of invalidItems.entries()) {
+      const itemPath = path.join(dir, `invalid-${index}.json`);
+      await fs.writeFile(itemPath, JSON.stringify(item));
+      result = run(['add', '--dir', dir, '--file', itemPath]);
+      assert.equal(result.status, 2, `${index}: ${result.stderr}`);
+    }
+
+    const items = [
+      { title: '保存期間', sections: [], answer: { type: 'choice', options: [{ value: '7', label: '7日' }, { value: '30', label: '30日' }], recommended: '30' } },
+      { title: '推奨なし', sections: [], answer: { type: 'choice', options: [{ value: 'a', label: '案A' }, { value: 'b', label: '案B' }] } },
+      { title: '確認画面', sections: [], answer: { type: 'yesno', recommended: false } },
+      { title: '複数選択', sections: [], answer: { type: 'multi', options: [{ value: 'a', label: '案A' }, { value: 'b', label: '案B' }], min: 2, recommended: ['a', 'b'] } },
+      { title: '自由記入禁止', sections: [], answer: { type: 'choice', options: [{ value: 'x', label: '案X' }, { value: 'z', label: '案Z' }], recommended: 'z' } },
+    ];
+    for (const [index, item] of items.entries()) {
+      const itemPath = path.join(dir, `item-${index}.json`);
+      await fs.writeFile(itemPath, JSON.stringify(item));
+      result = run(['add', '--dir', dir, '--file', itemPath]);
+      assert.equal(result.status, 0, result.stderr);
+    }
+
+    const server = await startServer(dir);
+    serverProcess = server.child;
+    const port = server.meta.port;
+    let response = await request(port, '/api/answer', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ id: 'q-1', value: '30', note: '', byRecommendation: 'true' }) });
+    assert.equal(response.status, 400);
+
+    response = await request(port, '/api/answer', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ id: 'q-1', value: '7', note: '', byRecommendation: true }) });
+    assert.equal(response.status, 400);
+    assert.match(response.body, /推奨の値と一致しません/);
+
+    response = await request(port, '/api/answer', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ id: 'q-1', value: '30', note: '', byRecommendation: true }) });
+    assert.equal(response.status, 200, response.body);
+    let answerResponse = JSON.parse(response.body);
+    assert.equal(answerResponse.item.response.value, '30');
+    assert.equal(answerResponse.item.response.byRecommendation, true);
+    assert.match(answerResponse.message, /回答: 30日（推奨をそのまま採用）/);
+    assert.match(answerResponse.message, /"byRecommendation":true/);
+
+    response = await request(port, '/api/answer', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ id: 'q-2', value: 'a', note: '', byRecommendation: true }) });
+    assert.equal(response.status, 400);
+
+    response = await request(port, '/api/answer', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ id: 'q-2', value: 'a', note: '' }) });
+    assert.equal(response.status, 200, response.body);
+    answerResponse = JSON.parse(response.body);
+    assert.equal(Object.hasOwn(answerResponse.item.response, 'byRecommendation'), false);
+
+    response = await request(port, '/api/answer', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ id: 'q-3', value: false, note: '', byRecommendation: true }) });
+    assert.equal(response.status, 200, response.body);
+    answerResponse = JSON.parse(response.body);
+    assert.equal(answerResponse.item.response.value, false);
+    assert.equal(answerResponse.item.response.byRecommendation, true);
+
+    response = await request(port, '/api/answer', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ id: 'q-4', value: ['b', 'a'], note: '', byRecommendation: true }) });
+    assert.equal(response.status, 200, response.body);
+
+    response = await request(port, '/api/answer', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ id: 'q-5', value: 'z', note: '理由', byRecommendation: true }) });
+    assert.equal(response.status, 400);
+    assert.match(response.body, /推奨で送るときは自由記入を空にしてください/);
+
+    const board = JSON.parse(await fs.readFile(path.join(dir, 'board.json'), 'utf8'));
+    assert.equal(board.items.find((item) => item.id === 'q-1').response.byRecommendation, true);
+    const records = (await fs.readFile(path.join(dir, 'answers.jsonl'), 'utf8')).trim().split('\n').map((line) => JSON.parse(line));
+    assert.equal(records.find((record) => record.id === 'q-1').byRecommendation, true);
+    assert.equal(Object.hasOwn(records.find((record) => record.id === 'q-2'), 'byRecommendation'), false);
+  } finally {
+    if (serverProcess && !serverProcess.killed) {
+      serverProcess.kill('SIGTERM');
+      await new Promise((resolve) => serverProcess.once('exit', resolve));
+    }
+    await fs.rm(dir, { recursive: true, force: true });
+  }
+});

@@ -8,6 +8,7 @@
   <script type="module" src="https://cdn.jsdelivr.net/npm/@awesome.me/webawesome@3.14.0/dist-cdn/webawesome.loader.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/marked@18.1.0/lib/marked.umd.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/dompurify@3.4.16/dist/purify.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/mermaid@12.1.0/dist/mermaid.min.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/chart.js@4.5.1/dist/chart.umd.min.js"></script>
   <style>
     :root {
@@ -103,12 +104,14 @@
     .response-view { display: grid; gap: 10px; padding: 13px; border: 1px solid var(--board-border); border-radius: 8px; }
     .response-value { font-weight: 600; overflow-wrap: anywhere; }
     .response-note { white-space: pre-wrap; overflow-wrap: anywhere; color: var(--board-muted); }
+    .mermaid-error { color: var(--board-muted); font-size: .8rem; }
     .command-line { display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: center; gap: 8px; }
     .command-line code { display: block; padding: 8px; overflow-wrap: anywhere; color: var(--board-text); background: var(--board-bg); border-radius: 5px; }
     .empty { padding: 25px 10px; text-align: center; color: var(--board-muted); }
     .footer { position: fixed; z-index: 11; right: auto; bottom: 0; left: 50%; width: min(760px, calc(100% - 28px)); transform: translateX(-50%); display: flex; justify-content: center; gap: 8px; padding: 9px max(14px, env(safe-area-inset-right)) calc(9px + env(safe-area-inset-bottom)) max(14px, env(safe-area-inset-left)); border-top: 1px solid var(--board-border); background: var(--board-header); backdrop-filter: blur(10px); }
     .footer wa-button { min-width: 0; }
-    .footer .send { margin-left: auto; }
+    .footer .cancel { margin-left: auto; }
+    .footer .send { margin-left: 0; }
     .toast { position: fixed; z-index: 30; right: 14px; bottom: 74px; max-width: min(400px, calc(100% - 28px)); padding: 10px 13px; color: #fff; background: #27364a; border-radius: 7px; opacity: 0; transform: translateY(8px); pointer-events: none; transition: opacity .16s, transform .16s; }
     .toast.show { opacity: 1; transform: translateY(0); }
     .dialog-copy { display: grid; gap: 10px; }
@@ -121,6 +124,7 @@
       .option-columns, .metric-grid { grid-template-columns: 1fr; }
       .footer { width: min(760px, calc(100% - 20px)); gap: 5px; }
       .footer wa-button { flex: 1; }
+      .footer .cancel { margin-left: 0; }
       .footer .send { margin-left: 0; }
     }
   </style>
@@ -250,12 +254,103 @@
         if (className) element.className = className;
         return element;
       }
+      function parseMarkdownDocument(value) {
+        const source = String(value ?? '');
+        const match = source.match(/^---\r?\n([\s\S]*?)\r?\n---(?:\r?\n|$)/);
+        if (!match) return { body: source, title: '' };
+        const titleLine = match[1].split(/\r?\n/).find((line) => /^title\s*:/.test(line));
+        let title = titleLine ? titleLine.replace(/^title\s*:\s*/, '').trim() : '';
+        if ((title.startsWith('"') && title.endsWith('"')) || (title.startsWith("'") && title.endsWith("'"))) title = title.slice(1, -1);
+        return { body: source.slice(match[0].length), title };
+      }
+      function escapeHtmlAttribute(value) {
+        return String(value).replaceAll('&', '&amp;').replaceAll('"', '&quot;').replaceAll('<', '&lt;').replaceAll('>', '&gt;');
+      }
+      function renderMarkdownBlocks(source, parser, depth = 0) {
+        const lines = String(source).split(/\r?\n/);
+        const output = [];
+        const normal = [];
+        const flush = () => {
+          if (normal.length) {
+            output.push(parser(normal.join('\n')));
+            normal.length = 0;
+          }
+        };
+        for (let index = 0; index < lines.length; index += 1) {
+          const opening = lines[index].match(/^(:{3,})(message|details)(?:\s+(.*?))?\s*$/);
+          if (!opening || depth >= 2) {
+            normal.push(lines[index]);
+            continue;
+          }
+          flush();
+          const closePattern = new RegExp(`^${opening[1]}\\s*$`);
+          let closeIndex = -1;
+          for (let candidate = index + 1; candidate < lines.length; candidate += 1) {
+            if (closePattern.test(lines[candidate])) {
+              closeIndex = candidate;
+              break;
+            }
+          }
+          const inner = lines.slice(index + 1, closeIndex < 0 ? lines.length : closeIndex).join('\n');
+          const innerHtml = renderMarkdownBlocks(inner, parser, depth + 1);
+          if (opening[2] === 'message') {
+            const variant = opening[3]?.trim() === 'alert' ? 'danger' : 'brand';
+            output.push(`<wa-callout variant="${variant}">${innerHtml}</wa-callout>`);
+          } else {
+            output.push(`<wa-details summary="${escapeHtmlAttribute(opening[3]?.trim() || '')}">${innerHtml}</wa-details>`);
+          }
+          index = closeIndex < 0 ? lines.length : closeIndex;
+        }
+        flush();
+        return output.join('');
+      }
+      function mermaidFallback(source) {
+        const wrapper = node('div', null, 'mermaid-fallback');
+        wrapper.append(node('div', '図を描けませんでした', 'mermaid-error'));
+        const pre = document.createElement('pre');
+        const code = document.createElement('code');
+        code.textContent = source;
+        pre.append(code);
+        wrapper.append(pre);
+        return wrapper;
+      }
+      function drawMermaid(element) {
+        const codeBlocks = [...element.querySelectorAll('code.language-mermaid')].map((code) => ({
+          source: code.textContent || '',
+          pre: code.closest('pre'),
+        })).filter((block) => block.pre);
+        if (!codeBlocks.length) return;
+        queueMicrotask(async () => {
+          const mermaid = window.mermaid;
+          if (!mermaid) {
+            for (const block of codeBlocks) block.pre.replaceWith(mermaidFallback(block.source));
+            return;
+          }
+          try {
+            mermaid.initialize({ startOnLoad: false, securityLevel: 'strict', theme: document.documentElement.classList.contains('wa-dark') ? 'dark' : 'default' });
+          } catch {}
+          for (const block of codeBlocks) {
+            const diagram = node('div', block.source, 'mermaid');
+            block.pre.replaceWith(diagram);
+            try {
+              await mermaid.run({ nodes: [diagram] });
+              if (!diagram.querySelector('svg')) throw new Error('mermaid');
+            } catch {
+              diagram.replaceWith(mermaidFallback(block.source));
+            }
+          }
+        });
+      }
       function markdown(value) {
         const element = document.createElement('div');
         element.className = 'markdown';
         const parser = window.marked && (window.marked.parse || (window.marked.marked && window.marked.marked.parse));
-        if (parser && window.DOMPurify) element.innerHTML = window.DOMPurify.sanitize(parser(String(value ?? '')));
-        else element.textContent = String(value ?? '');
+        const documentInfo = parseMarkdownDocument(value);
+        if (parser && window.DOMPurify) {
+          const html = renderMarkdownBlocks(documentInfo.body, parser);
+          element.innerHTML = window.DOMPurify.sanitize(html, { ADD_TAGS: ['wa-callout', 'wa-details'], ADD_ATTR: ['variant', 'summary'] });
+          drawMermaid(element);
+        } else element.textContent = documentInfo.body;
         return element;
       }
       function divider() { return document.createElement('wa-divider'); }
@@ -548,32 +643,77 @@
           const value = control.value;
           return value === 'true' ? true : value === 'false' ? false : null;
         }
-        if (answer.type === 'multi') return [...control.querySelectorAll('wa-checkbox')].filter((checkbox) => checkbox.checked).map((checkbox) => checkbox.value);
-        if (answer.type === 'rating') return Number(control.value || 0);
+        if (answer.type === 'multi') {
+          const value = [...control.querySelectorAll('wa-checkbox')].filter((checkbox) => checkbox.checked).map((checkbox) => checkbox.value);
+          return value.length ? value : null;
+        }
+        if (answer.type === 'rating') {
+          const value = Number(control.value || 0);
+          return value > 0 ? value : null;
+        }
         if (answer.type === 'scale') return formState.scaleTouched ? Number(control.value) : null;
         if (answer.type === 'number') return control.value === '' || control.value == null ? null : Number(control.value);
         return null;
       }
       function formNote(formState) { return formState.note.value || ''; }
+      function isRecommendationMode(formState) {
+        return Boolean(formState && formState.item.answer.recommended !== undefined && formValue(formState) === null && formNote(formState).trim() === '');
+      }
       function answerReady(formState) {
         const answer = formState.item.answer;
         const value = formValue(formState);
         const note = formNote(formState);
-        if (answer.type === 'choice') return value !== null;
+        if (value === null) return note.trim() !== '';
+        if (answer.type === 'choice') return true;
         if (answer.type === 'multi') return value.length >= (answer.min ?? 1) && (answer.max === undefined || value.length <= answer.max);
         if (answer.type === 'rating') return value > 0;
         if (answer.type === 'scale') return formState.scaleTouched;
         if (answer.type === 'yesno') return value === true || value === false;
-        if (answer.type === 'number') return typeof value === 'number' && Number.isFinite(value);
+        if (answer.type === 'number') return typeof value === 'number' && Number.isFinite(value) && (answer.min === undefined || value >= answer.min) && (answer.max === undefined || value <= answer.max);
         return note.trim() !== '';
       }
+      function hasAnswerValue(formState) {
+        const answer = formState.item.answer;
+        if (answer.type === 'text') return formNote(formState).trim() !== '';
+        if (answer.type === 'scale') return formState.scaleTouched;
+        return formValue(formState) !== null;
+      }
       function saveForm(formState) {
-        saveDraft(formState.item, formValue(formState), formNote(formState));
+        const value = formValue(formState);
+        const note = formNote(formState);
+        if (value === null && note.trim() === '') removeDraft(formState.item.id);
+        else saveDraft(formState.item, value, note);
         updateSendButton(formState);
       }
       function updateSendButton(formState) {
         const send = document.querySelector('#send-button');
-        if (send) send.disabled = !answerReady(formState);
+        const recommendation = isRecommendationMode(formState);
+        if (send) {
+          send.textContent = recommendation ? '推奨' : '送信';
+          send.disabled = !recommendation && !answerReady(formState);
+        }
+        const cancel = document.querySelector('#cancel-button');
+        if (cancel) cancel.disabled = !hasAnswerValue(formState);
+      }
+      function cancelAnswer(formState) {
+        if (!formState) return;
+        const answer = formState.item.answer;
+        if (answer.type === 'choice' || answer.type === 'yesno') {
+          formState.control.value = '';
+          formState.control.querySelectorAll('wa-radio').forEach((radio) => { radio.checked = false; });
+        } else if (answer.type === 'multi') {
+          formState.control.querySelectorAll('wa-checkbox').forEach((checkbox) => { checkbox.checked = false; });
+        } else if (answer.type === 'rating') {
+          formState.control.value = 0;
+        } else if (answer.type === 'scale') {
+          formState.scaleTouched = false;
+          formState.control.value = answer.min;
+        } else if (answer.type === 'number') {
+          formState.control.value = '';
+        } else if (answer.type === 'text') {
+          formState.note.value = '';
+        }
+        saveForm(formState);
       }
       function responseDisplay(item, localDraft) {
         const view = node('div', null, 'response-view');
@@ -604,6 +744,10 @@
         } else {
           const draft = readDraft(item.id);
           if (item.answer.prompt) answerBox.append(node('p', item.answer.prompt, 'answer-prompt'));
+          if (item.answer.recommended !== undefined) {
+            const recommendation = responseValueText(item, item.answer.recommended).replace(/^回答: /, '');
+            answerBox.append(node('div', `推奨: ${recommendation}`, 'note-label'));
+          }
           let controlInfo;
           if (item.answer.type === 'text') {
             controlInfo = { wrap: node('div', null, 'answer-control'), control: null };
@@ -638,6 +782,7 @@
       }
       function responseValueText(item, value) {
         const answer = item.answer;
+        if (value == null && answer.type !== 'text') return '回答: 選択なし（自由記入のみ）';
         if (answer.type === 'choice') return `回答: ${answer.options.find((option) => option.value === value)?.label || String(value ?? '')}`;
         if (answer.type === 'multi') return `回答: ${(Array.isArray(value) ? value : []).map((part) => answer.options.find((option) => option.value === part)?.label || String(part)).join('、')}`;
         if (answer.type === 'rating') return `回答: ★${value || 0}/${answer.max || 5}`;
@@ -646,7 +791,8 @@
         return `回答: ${value == null ? '' : value}${answer.unit ? ` ${answer.unit}` : ''}`;
       }
       function renderRead(read) {
-        app.append(node('h1', read.title));
+        const heading = node('h1', read.title);
+        app.append(heading);
         const panel = node('section', null, 'panel');
         const loading = node('div', '読み込み中です。', 'empty');
         panel.append(loading);
@@ -654,7 +800,11 @@
         fetch(`./${read.file}`, { cache: 'no-store' }).then((response) => {
           if (!response.ok) throw new Error('read');
           return response.text();
-        }).then((body) => { panel.replaceChildren(markdown(body)); }).catch(() => { panel.replaceChildren(node('div', 'よみものを読み込めません。', 'empty')); });
+        }).then((body) => {
+          const documentInfo = parseMarkdownDocument(body);
+          if (!read.title && documentInfo.title) heading.textContent = documentInfo.title;
+          panel.replaceChildren(markdown(body));
+        }).catch(() => { panel.replaceChildren(node('div', 'よみものを読み込めません。', 'empty')); });
       }
       function renderFooter(route) {
         footer.replaceChildren();
@@ -668,34 +818,54 @@
         previous.setAttribute('variant', 'neutral');
         const next = node('wa-button', '次へ');
         next.setAttribute('variant', 'neutral');
-        const targets = openItems();
         const current = route.type === 'question' && board ? board.items.find((item) => item.id === route.id) : null;
-        let previousItem = null;
-        let nextItem = targets[0] || null;
-        if (current) {
-          const index = targets.findIndex((item) => item.id === current.id);
-          previousItem = index > 0 ? targets[index - 1] : null;
-          nextItem = index >= 0 && index < targets.length - 1 ? targets[index + 1] : null;
-          if (index < 0) {
-            const all = sortedItems();
-            const currentIndex = all.findIndex((item) => item.id === current.id);
-            previousItem = [...all.slice(0, currentIndex)].reverse().find((item) => targets.some((target) => target.id === item.id)) || null;
-            nextItem = all.slice(currentIndex + 1).find((item) => targets.some((target) => target.id === item.id)) || null;
+        let previousTarget = null;
+        let nextTarget = null;
+        if (readRoute) {
+          const reads = board?.reads || [];
+          if (route.type === 'read') {
+            const index = reads.findIndex((read) => read.id === route.id);
+            previousTarget = index > 0 ? reads[index - 1] : null;
+            nextTarget = index >= 0 ? reads[index + 1] || null : reads[0] || null;
+          } else {
+            nextTarget = reads[0] || null;
+          }
+        } else {
+          const targets = openItems();
+          nextTarget = targets[0] || null;
+          if (current) {
+            const index = targets.findIndex((item) => item.id === current.id);
+            previousTarget = index > 0 ? targets[index - 1] : null;
+            nextTarget = index >= 0 && index < targets.length - 1 ? targets[index + 1] : null;
+            if (index < 0) {
+              const all = sortedItems();
+              const currentIndex = all.findIndex((item) => item.id === current.id);
+              previousTarget = [...all.slice(0, currentIndex)].reverse().find((item) => targets.some((target) => target.id === item.id)) || null;
+              nextTarget = all.slice(currentIndex + 1).find((item) => targets.some((target) => target.id === item.id)) || null;
+            }
           }
         }
-        previous.disabled = !previousItem;
-        next.disabled = !nextItem;
-        if (previousItem) previous.addEventListener('click', () => go(`#/q/${encodeURIComponent(previousItem.id)}`));
-        if (nextItem) next.addEventListener('click', () => go(`#/q/${encodeURIComponent(nextItem.id)}`));
+        previous.disabled = !previousTarget;
+        next.disabled = !nextTarget;
+        if (previousTarget) previous.addEventListener('click', () => go(`${readRoute ? '#/r/' : '#/q/'}${encodeURIComponent(previousTarget.id)}`));
+        if (nextTarget) next.addEventListener('click', () => go(`${readRoute ? '#/r/' : '#/q/'}${encodeURIComponent(nextTarget.id)}`));
         footer.append(list, previous, next);
         if (current && current.status === 'open' && !isPasted(current)) {
+          const cancel = node('wa-button', '取消');
+          cancel.id = 'cancel-button';
+          cancel.setAttribute('variant', 'neutral');
+          cancel.setAttribute('appearance', 'outlined');
+          cancel.className = 'cancel';
+          cancel.disabled = !window.currentForm || !hasAnswerValue(window.currentForm);
+          cancel.addEventListener('click', () => cancelAnswer(window.currentForm));
           const send = node('wa-button', '送信');
           send.id = 'send-button';
           send.setAttribute('variant', 'brand');
           send.className = 'send';
-          send.disabled = !window.currentForm || !answerReady(window.currentForm);
+          send.disabled = !window.currentForm || (!isRecommendationMode(window.currentForm) && !answerReady(window.currentForm));
           send.addEventListener('click', () => submitAnswer(current, window.currentForm));
-          footer.append(send);
+          footer.append(cancel, send);
+          updateSendButton(window.currentForm);
         }
         syncFooterSpace();
         window.requestAnimationFrame(syncFooterSpace);
@@ -707,19 +877,24 @@
         clearTimeout(toastTimer);
         toastTimer = setTimeout(() => toast.classList.remove('show'), 3200);
       }
-      function buildLocalMessage(item, formState) {
-        const value = item.answer.type === 'text' ? null : formValue(formState);
-        const note = formNote(formState);
+      function buildLocalMessage(item, formState, byRecommendation = isRecommendationMode(formState)) {
+        const value = byRecommendation ? item.answer.recommended : item.answer.type === 'text' ? null : formValue(formState);
+        const note = byRecommendation ? '' : formNote(formState);
         const answeredAt = new Date().toISOString();
-        const json = JSON.stringify({ boardId: board.board.id, id: item.id, value, note, answeredAt });
-        const display = responseValueText(item, value).replace(/^回答: /, '');
+        const jsonValue = { boardId: board.board.id, id: item.id, value, note, answeredAt };
+        if (byRecommendation) jsonValue.byRecommendation = true;
+        const json = JSON.stringify(jsonValue);
+        const display = `${responseValueText(item, value).replace(/^回答: /, '')}${byRecommendation ? '（推奨をそのまま採用）' : ''}`;
         return `[decision-board] 回答が届きました: ${item.id} 「${item.title}」\n回答: ${display}\n自由記入: ${note.trim() ? note : 'なし'}\nJSON: ${json}\n\nこの回答を反映し終えたら、次のコマンドで閉じてください（HTML は自動で更新されます。HTML を手で直さないでください）:\n${board.board.commands.close.replaceAll('{id}', item.id)}`;
       }
       async function submitAnswer(item, formState) {
-        if (!formState || !answerReady(formState)) return;
-        const value = item.answer.type === 'text' ? null : formValue(formState);
-        const note = formNote(formState);
+        if (!formState) return;
+        const byRecommendation = isRecommendationMode(formState);
+        if (!byRecommendation && !answerReady(formState)) return;
+        const value = byRecommendation ? item.answer.recommended : item.answer.type === 'text' ? null : formValue(formState);
+        const note = byRecommendation ? '' : formNote(formState);
         const payload = { id: item.id, value, note };
+        if (byRecommendation) payload.byRecommendation = true;
         const beforeTargets = openItems();
         const beforeIndex = beforeTargets.findIndex((candidate) => candidate.id === item.id);
         const nextBeforeUpdate = beforeIndex >= 0 ? beforeTargets[beforeIndex + 1] : null;
@@ -733,7 +908,7 @@
           showToast(result.notified === true ? '送りました（エージェントに知らせ済み）' : result.notified === null ? '送りました（知らせる設定なし）' : '送りました（知らせに失敗しました）');
           if (nextBeforeUpdate) go(`#/q/${encodeURIComponent(nextBeforeUpdate.id)}`); else go('#/list/decisions');
         } catch {
-          const message = buildLocalMessage(item, formState);
+          const message = buildLocalMessage(item, formState, byRecommendation);
           saveDraft(item, value, note, 'pasted');
           document.getElementById('paste-message').textContent = message;
           const copy = document.getElementById('paste-copy');

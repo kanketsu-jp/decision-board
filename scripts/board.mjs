@@ -189,6 +189,29 @@ function requireString(value, label, { empty = false } = {}) {
   }
 }
 
+function answerValueReason(answer, value) {
+  if (answer.type === 'choice') {
+    if (typeof value !== 'string' || !answer.options.some((option) => option.value === value)) return '選択肢が不正です';
+  } else if (answer.type === 'multi') {
+    const min = answer.min ?? 1;
+    if (!Array.isArray(value) || new Set(value).size !== value.length || value.some((part) => typeof part !== 'string' || !answer.options.some((option) => option.value === part))) return '複数選択が不正です';
+    if (value.length < min || (answer.max !== undefined && value.length > answer.max)) return '選択数が範囲外です';
+  } else if (answer.type === 'rating') {
+    const max = answer.max ?? 5;
+    if (typeof value !== 'number' || !Number.isInteger(value) || value < 1 || value > max) return '評価が不正です';
+  } else if (answer.type === 'scale') {
+    const step = answer.step ?? 1;
+    if (typeof value !== 'number' || !Number.isFinite(value) || value < answer.min || value > answer.max || Math.abs((value - answer.min) / step - Math.round((value - answer.min) / step)) > 1e-9) return '尺度の値が不正です';
+  } else if (answer.type === 'yesno') {
+    if (value !== true && value !== false) return 'はい・いいえの値が不正です';
+  } else if (answer.type === 'number') {
+    if (typeof value !== 'number' || !Number.isFinite(value) || (answer.min !== undefined && value < answer.min) || (answer.max !== undefined && value > answer.max)) return '数値が不正です';
+  } else {
+    return '自由記入型には値を指定できません';
+  }
+  return null;
+}
+
 function validateSections(sections) {
   if (!Array.isArray(sections)) throw new BoardError('sections は配列で指定してください');
   for (const [index, section] of sections.entries()) {
@@ -295,6 +318,13 @@ function validateAnswer(answer) {
     for (const field of ['min', 'max']) if (answer[field] !== undefined && (typeof answer[field] !== 'number' || !Number.isFinite(answer[field]))) throw new BoardError(`number.${field} が不正です`);
     if (answer.min !== undefined && answer.max !== undefined && answer.min > answer.max) throw new BoardError('number.min と max が不正です');
     if (answer.unit !== undefined) requireString(answer.unit, 'number.unit', { empty: true });
+  }
+  if (answer.recommended !== undefined) {
+    if (answer.type === 'multi' && Array.isArray(answer.recommended) && answer.recommended.length === 0) {
+      throw new BoardError('answer.recommended が不正です: 空配列は指定できません');
+    }
+    const reason = answerValueReason(answer, answer.recommended);
+    if (reason) throw new BoardError(`answer.recommended が不正です: ${reason}`);
   }
 }
 
@@ -521,48 +551,43 @@ function allowedOrigin(origin, port) {
 
 function responseValueText(item, value) {
   const answer = item.answer;
+  if (value == null && answer.type !== 'text') return '選択なし（自由記入のみ）';
   if (answer.type === 'choice') return answer.options.find((option) => option.value === value)?.label ?? String(value);
   if (answer.type === 'multi') return (Array.isArray(value) ? value : []).map((part) => answer.options.find((option) => option.value === part)?.label ?? String(part)).join('、');
   if (answer.type === 'rating') return `★${value}/${answer.max ?? 5}`;
-  if (answer.type === 'yesno') return value ? 'はい' : 'いいえ';
+  if (answer.type === 'yesno') return value ? (answer.yesLabel || 'はい') : (answer.noLabel || 'いいえ');
   if (answer.type === 'text') return '自由記入';
   if (answer.type === 'number' && answer.unit) return `${value} ${answer.unit}`;
   return String(value);
+}
+
+function sameAnswerValue(answer, value, recommended) {
+  if (answer.type !== 'multi') return value === recommended;
+  return Array.isArray(value) && Array.isArray(recommended) && value.length === recommended.length && value.every((part) => recommended.includes(part));
 }
 
 function responseReason(item, value, note) {
   if (typeof note !== 'string') return 'note は文字列で指定してください';
   if (note.length > MAX_NOTE) return `note は ${MAX_NOTE} 字以内にしてください`;
   const answer = item.answer;
-  if (answer.type === 'choice') {
-    if (typeof value !== 'string' || !answer.options.some((option) => option.value === value)) return '選択肢が不正です';
-  } else if (answer.type === 'multi') {
-    const min = answer.min ?? 1;
-    if (!Array.isArray(value) || new Set(value).size !== value.length || value.some((part) => typeof part !== 'string' || !answer.options.some((option) => option.value === part))) return '複数選択が不正です';
-    if (value.length < min || (answer.max !== undefined && value.length > answer.max)) return '選択数が範囲外です';
-  } else if (answer.type === 'rating') {
-    const max = answer.max ?? 5;
-    if (typeof value !== 'number' || !Number.isInteger(value) || value < 1 || value > max) return '評価が不正です';
-  } else if (answer.type === 'scale') {
-    const step = answer.step ?? 1;
-    if (typeof value !== 'number' || !Number.isFinite(value) || value < answer.min || value > answer.max || Math.abs((value - answer.min) / step - Math.round((value - answer.min) / step)) > 1e-9) return '尺度の値が不正です';
-  } else if (answer.type === 'yesno') {
-    if (value !== true && value !== false) return 'はい・いいえの値が不正です';
-  } else if (answer.type === 'number') {
-    if (typeof value !== 'number' || !Number.isFinite(value) || (answer.min !== undefined && value < answer.min) || (answer.max !== undefined && value > answer.max)) return '数値が不正です';
-  } else if (answer.type === 'text') {
+  if (answer.type === 'text') {
     if (note.trim() === '') return '自由記入を入力してください';
+    return null;
   }
-  return null;
+  if (value === null || value === undefined) return note.trim() === '' ? '回答か自由記入を入力してください' : null;
+  return answerValueReason(answer, value);
 }
 
 function closeCommand(board, id) {
   return board.board.commands.close.replaceAll('{id}', id);
 }
 
-function answerMessage(board, item, value, note, answeredAt) {
-  const json = JSON.stringify({ boardId: board.board.id, id: item.id, value, note, answeredAt });
-  return `[decision-board] 回答が届きました: ${item.id} 「${item.title}」\n回答: ${responseValueText(item, value)}\n自由記入: ${note.trim() === '' ? 'なし' : note}\nJSON: ${json}\n\nこの回答を反映し終えたら、次のコマンドで閉じてください（HTML は自動で更新されます。HTML を手で直さないでください）:\n${closeCommand(board, item.id)}`;
+function answerMessage(board, item, value, note, answeredAt, byRecommendation = false) {
+  const jsonValue = { boardId: board.board.id, id: item.id, value, note, answeredAt };
+  if (byRecommendation) jsonValue.byRecommendation = true;
+  const json = JSON.stringify(jsonValue);
+  const display = `${responseValueText(item, value)}${byRecommendation ? '（推奨をそのまま採用）' : ''}`;
+  return `[decision-board] 回答が届きました: ${item.id} 「${item.title}」\n回答: ${display}\n自由記入: ${note.trim() === '' ? 'なし' : note}\nJSON: ${json}\n\nこの回答を反映し終えたら、次のコマンドで閉じてください（HTML は自動で更新されます。HTML を手で直さないでください）:\n${closeCommand(board, item.id)}`;
 }
 
 function requestBody(request) {
@@ -683,22 +708,32 @@ function makeServer(dir) {
             const item = board.items.find((candidate) => candidate.id === payload.id);
             if (!item) throw jsonError('項目がありません', 404);
             if (item.status !== 'open') throw jsonError('この項目は回答済みです', 409);
+            if (payload.byRecommendation !== undefined && typeof payload.byRecommendation !== 'boolean') throw jsonError('byRecommendation は真偽値で指定してください', 400);
+            const byRecommendation = payload.byRecommendation === true;
             const note = payload.note === undefined ? '' : payload.note;
+            if (byRecommendation) {
+              if (item.answer.recommended === undefined) throw jsonError('推奨がありません', 400);
+              if (typeof note === 'string' && note.trim() !== '') throw jsonError('推奨で送るときは自由記入を空にしてください', 400);
+              if (!sameAnswerValue(item.answer, payload.value, item.answer.recommended)) throw jsonError('推奨の値と一致しません', 400);
+            }
             const reason = responseReason(item, payload.value, note);
             if (reason) throw jsonError(reason, 400);
             const answeredAt = now();
-            const value = item.answer.type === 'text' ? null : payload.value;
-            const message = answerMessage(board, item, value, note, answeredAt);
+            const value = item.answer.type === 'text' || payload.value == null ? null : payload.value;
+            const message = answerMessage(board, item, value, note, answeredAt, byRecommendation);
             item.response = { value, note, answeredAt, via: 'server' };
+            if (byRecommendation) item.response.byRecommendation = true;
             item.status = 'answered';
-            await appendJsonLine(path.join(dir, 'answers.jsonl'), {
+            const answerRecord = {
               boardId: board.board.id,
               id: item.id,
               title: item.title,
               value,
               note,
               answeredAt,
-            });
+            };
+            if (byRecommendation) answerRecord.byRecommendation = true;
+            await appendJsonLine(path.join(dir, 'answers.jsonl'), answerRecord);
             await writeBoard(dir, board);
             const notification = await notifyInbox(board.board.inbox, message);
             const response = { ok: true, item, ...notification, message, closeCommand: closeCommand(board, item.id) };
