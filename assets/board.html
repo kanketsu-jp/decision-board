@@ -690,6 +690,7 @@
         const recommendation = isRecommendationMode(formState);
         if (send) {
           send.textContent = recommendation ? '推奨' : '送信';
+          send.setAttribute('variant', recommendation ? 'success' : 'brand');
           send.disabled = !recommendation && !answerReady(formState);
         }
         const cancel = document.querySelector('#cancel-button');
