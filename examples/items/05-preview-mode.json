@@ -1,0 +1,17 @@
+{
+  "title": "公開前の確認画面を必須にするか",
+  "importance": 4,
+  "sections": [
+    { "type": "callout", "variant": "danger", "md": "確認画面を省略すると、入力ミスがそのまま公開される可能性があります。" },
+    { "type": "options", "items": [
+      { "key": "always", "label": "常に表示", "pros": ["事故を減らせる"], "cons": ["操作が1段増える"], "recommended": true },
+      { "key": "large", "label": "大きな変更だけ", "pros": ["操作を抑えられる"], "cons": ["判定条件が必要"] }
+    ] }
+  ],
+  "answer": {
+    "type": "yesno",
+    "yesLabel": "必須にする",
+    "noLabel": "必須にしない",
+    "prompt": "確認画面を必須にしますか。"
+  }
+}

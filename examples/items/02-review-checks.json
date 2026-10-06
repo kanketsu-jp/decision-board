@@ -1,0 +1,23 @@
+{
+  "title": "レビューで必ず確認する項目を選ぶか",
+  "importance": 4,
+  "sections": [
+    { "type": "callout", "variant": "warning", "md": "確認項目を増やしすぎると、レビューが形式的になるおそれがあります。" },
+    { "type": "table", "heading": "候補の比較", "columns": ["項目", "効果", "負担"], "rows": [
+      ["テスト", "回帰を減らす", "小"],
+      ["権限", "事故を防ぐ", "中"],
+      ["ログ", "調査しやすい", "小"]
+    ] }
+  ],
+  "answer": {
+    "type": "multi",
+    "prompt": "必須にする確認項目を選んでください。",
+    "min": 1,
+    "max": 2,
+    "options": [
+      { "value": "test", "label": "テスト" },
+      { "value": "permission", "label": "権限" },
+      { "value": "log", "label": "ログ" }
+    ]
+  }
+}

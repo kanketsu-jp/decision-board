@@ -1,0 +1,20 @@
+{
+  "title": "自動化にかける時間の水準を決めるか",
+  "importance": 2,
+  "sections": [
+    { "type": "chart", "heading": "候補ごとの作業時間", "chart": { "type": "bar", "labels": ["最小", "標準", "強化"], "datasets": [ { "label": "初期作業時間", "data": [2, 5, 9] }, { "label": "月次削減時間", "data": [1, 4, 6] } ] } },
+    { "type": "metric", "items": [
+      { "label": "今月の余力", "value": "8", "unit": "時間" },
+      { "label": "対象作業", "value": "3", "unit": "種類" }
+    ] }
+  ],
+  "answer": {
+    "type": "scale",
+    "min": 1,
+    "max": 5,
+    "step": 1,
+    "minLabel": "小さく始める",
+    "maxLabel": "広く自動化",
+    "prompt": "自動化の水準を選んでください。"
+  }
+}

@@ -1,0 +1,25 @@
+{
+  "title": "ログの保存期間を何日にするか",
+  "importance": 5,
+  "sections": [
+    { "type": "text", "heading": "背景", "md": "運用調査と障害対応に使うログの保存期間を決めます。長くするほど調査しやすくなりますが、保管量も増えます。" },
+    { "type": "options", "items": [
+      { "key": "7", "label": "7日", "summary": "保管量を小さくできます。", "pros": ["費用を抑えやすい"], "cons": ["古い障害を追いにくい"] },
+      { "key": "30", "label": "30日", "summary": "月単位の調査に対応します。", "pros": ["調査期間に余裕がある", "運用の説明がしやすい"], "cons": ["保管量が増える"], "recommended": true },
+      { "key": "90", "label": "90日", "summary": "長期の傾向も確認できます。", "pros": ["季節性を比較できる"], "cons": ["保管量と管理負担が大きい"] }
+    ] },
+    { "type": "metric", "items": [
+      { "label": "現在の1日量", "value": "2.4", "unit": "GB" },
+      { "label": "調査目標", "value": "30", "unit": "日", "note": "月次の振り返りに合わせます" }
+    ] }
+  ],
+  "answer": {
+    "type": "choice",
+    "prompt": "標準の保存期間を選んでください。",
+    "options": [
+      { "value": "7", "label": "7日", "hint": "最小構成" },
+      { "value": "30", "label": "30日", "hint": "月次運用" },
+      { "value": "90", "label": "90日", "hint": "長期調査" }
+    ]
+  }
+}

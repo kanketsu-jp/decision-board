@@ -1,0 +1,14 @@
+{
+  "title": "次回リリースの確認度をどう見るか",
+  "importance": 3,
+  "sections": [
+    { "type": "text", "heading": "見方", "md": "確認度は、手動確認と自動確認を合わせた感触で評価します。迷う場合は自由記入に理由を残してください。" },
+    { "type": "callout", "variant": "success", "md": "小さな変更でも、利用者が触る流れを一度確認します。" }
+  ],
+  "answer": {
+    "type": "rating",
+    "label": "確認度",
+    "max": 5,
+    "prompt": "今回の確認度を評価してください。"
+  }
+}

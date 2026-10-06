@@ -1,0 +1,791 @@
+<!doctype html>
+<html lang="ja">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <title>判断ボード</title>
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@awesome.me/webawesome@3.14.0/dist-cdn/styles/webawesome.css">
+  <script type="module" src="https://cdn.jsdelivr.net/npm/@awesome.me/webawesome@3.14.0/dist-cdn/webawesome.loader.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/marked@18.1.0/lib/marked.umd.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/dompurify@3.4.16/dist/purify.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/chart.js@4.5.1/dist/chart.umd.min.js"></script>
+  <style>
+    :root {
+      --wa-color-brand: #3768a8;
+      --wa-color-success: #287d55;
+      --wa-color-warning: #a16207;
+      --wa-color-danger: #b42318;
+      --board-bg: #f5f7fa;
+      --board-panel: #ffffff;
+      --board-text: #1f2937;
+      --board-muted: #667085;
+      --board-border: #d8dee8;
+      --board-header: rgba(255, 255, 255, .94);
+    }
+    html.wa-dark {
+      --board-bg: #151922;
+      --board-panel: #202632;
+      --board-text: #edf2f7;
+      --board-muted: #a8b3c2;
+      --board-border: #3b4656;
+      --board-header: rgba(32, 38, 50, .94);
+    }
+    * { box-sizing: border-box; }
+    html, body { margin: 0; min-height: 100%; background: var(--board-bg); color: var(--board-text); }
+    body { font-family: system-ui, -apple-system, BlinkMacSystemFont, "Hiragino Sans", sans-serif; overflow-x: hidden; padding-bottom: calc(var(--footer-height, 64px) + env(safe-area-inset-bottom)); }
+    button, input, textarea { font: inherit; }
+    wa-button, wa-badge, wa-copy-button, wa-divider, wa-dialog, wa-radio-group, wa-checkbox, wa-rating, wa-slider, wa-number-input, wa-textarea, wa-tab-group, wa-tab, wa-tooltip { --wa-font-family: inherit; }
+    .topbar { position: sticky; top: 0; z-index: 10; width: min(760px, calc(100% - 28px)); height: 50px; margin: 0 auto; display: grid; grid-template-columns: minmax(0, .45fr) minmax(0, .55fr) auto; align-items: center; gap: 12px; padding: 0 max(14px, env(safe-area-inset-right)) 0 max(14px, env(safe-area-inset-left)); border-bottom: 1px solid var(--board-border); background: var(--board-header); backdrop-filter: blur(10px); }
+    .topbar > * { min-width: 0; }
+    .topbar .session, .topbar .cwd { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; cursor: pointer; }
+    .topbar .session > span, .topbar .cwd > span { display: block; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .topbar .cwd { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; color: var(--board-muted); font-size: .82rem; }
+    .topbar wa-badge { white-space: nowrap; }
+    main { width: min(760px, calc(100% - 28px)); margin: 0 auto; padding: 22px 0 28px; }
+    .offline { margin: 0 auto 14px; padding: 7px 10px; border-left: 3px solid var(--wa-color-warning); color: var(--board-muted); font-size: .82rem; background: color-mix(in srgb, var(--wa-color-warning) 9%, var(--board-panel)); }
+    h1, h2, h3, p { overflow-wrap: anywhere; }
+    h1 { margin: 0 0 18px; font-size: clamp(1.35rem, 4vw, 1.85rem); line-height: 1.35; }
+    h2 { margin: 0 0 12px; font-size: 1.15rem; }
+    h3 { margin: 0 0 8px; font-size: 1rem; }
+    .panel { padding: 16px; background: var(--board-panel); border: 1px solid var(--board-border); border-radius: 10px; }
+    .list { display: grid; gap: 8px; }
+    .list-row { display: grid; grid-template-columns: minmax(0, 1fr); align-items: start; gap: 6px; width: 100%; min-width: 0; height: auto !important; padding: 12px 13px; text-align: left; color: inherit; background: var(--board-panel); border: 1px solid var(--board-border); border-radius: 8px; cursor: pointer; }
+    .list-row:hover { border-color: var(--wa-color-brand); }
+    .list-row > * { min-width: 0; }
+    .list-row .row-title { min-width: 0; overflow-wrap: anywhere; }
+    .status-mark { color: var(--board-muted); font-size: .8rem; white-space: nowrap; }
+    .status-mark.open { color: var(--wa-color-warning); }
+    .status-mark.answered { color: var(--wa-color-brand); }
+    .status-mark.closed { color: var(--board-muted); }
+    .status-mark.pasted { color: var(--wa-color-warning); }
+    .row-meta { display: flex; align-items: center; flex-wrap: wrap; gap: 8px; min-width: 0; color: var(--board-muted); font-size: .78rem; white-space: normal; }
+    .read-list { display: grid; gap: 8px; }
+    .read-button { width: 100%; padding: 12px 13px; border: 1px solid var(--board-border); border-radius: 8px; color: inherit; background: var(--board-panel); text-align: left; cursor: pointer; }
+    .read-button small { display: block; margin-top: 4px; color: var(--board-muted); }
+    .tabs { display: flex; gap: 8px; margin-bottom: 15px; }
+    .tabs wa-tab { border: 0; border-bottom: 2px solid transparent; border-radius: 0; padding: 7px 4px; color: var(--board-muted); background: transparent; cursor: pointer; }
+    .tabs wa-tab.active { color: var(--board-text); border-bottom-color: var(--wa-color-brand); }
+    .markdown { line-height: 1.7; }
+    .markdown > :first-child { margin-top: 0; }
+    .markdown > :last-child { margin-bottom: 0; }
+    .callout { padding: 13px 15px; border-left: 4px solid var(--wa-color-brand); border-radius: 7px; background: color-mix(in srgb, var(--wa-color-brand) 9%, var(--board-panel)); }
+    .callout.warning { border-left-color: var(--wa-color-warning); background: color-mix(in srgb, var(--wa-color-warning) 10%, var(--board-panel)); }
+    .callout.danger { border-left-color: var(--wa-color-danger); background: color-mix(in srgb, var(--wa-color-danger) 10%, var(--board-panel)); }
+    .callout.success { border-left-color: var(--wa-color-success); background: color-mix(in srgb, var(--wa-color-success) 10%, var(--board-panel)); }
+    .callout.neutral { border-left-color: var(--board-muted); background: color-mix(in srgb, var(--board-muted) 8%, var(--board-panel)); }
+    .option-grid { display: grid; gap: 10px; }
+    .option-card { padding: 13px; border: 1px solid var(--board-border); border-radius: 8px; }
+    .option-card .option-head { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+    .option-card p { margin: 6px 0; color: var(--board-muted); }
+    .option-columns { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; font-size: .88rem; }
+    .option-columns ul { margin: 5px 0 0; padding-left: 18px; }
+    .table-scroll, .chart-scroll { max-width: 100%; overflow-x: auto; overscroll-behavior-x: contain; }
+    .table-scroll table { min-width: 100%; border-collapse: collapse; }
+    th, td { padding: 9px 10px; border: 1px solid var(--board-border); text-align: left; vertical-align: top; overflow-wrap: anywhere; }
+    th { background: color-mix(in srgb, var(--board-muted) 9%, var(--board-panel)); }
+    .chart-inner { min-width: 560px; height: 280px; }
+    .metric-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; }
+    .metric { padding: 12px; border: 1px solid var(--board-border); border-radius: 8px; }
+    .metric-label, .metric-note { color: var(--board-muted); font-size: .82rem; }
+    .metric-value { margin: 4px 0; font-size: 1.45rem; font-weight: 650; overflow-wrap: anywhere; }
+    .unknown-block { color: var(--board-muted); font-size: .8rem; }
+    .answer-box { display: grid; gap: 13px; }
+    .answer-prompt { margin: 0; font-weight: 600; }
+    .answer-control { display: grid; gap: 7px; }
+    .answer-control .range-labels { display: flex; justify-content: space-between; color: var(--board-muted); font-size: .8rem; }
+    .answer-control wa-radio-group, .answer-control wa-rating, .answer-control wa-slider, .answer-control wa-number-input, .answer-control wa-textarea { width: 100%; }
+    .radio-options { display: flex; flex-wrap: wrap; gap: 8px; }
+    .radio-options.vertical { display: grid; }
+    .radio-options wa-radio { min-width: 0; }
+    .radio-options:not(.vertical) { flex-direction: row !important; }
+    .radio-options:not(.vertical) wa-radio { width: fit-content !important; flex: 0 1 auto; }
+    .note-label { color: var(--board-muted); font-size: .85rem; }
+    .response-view { display: grid; gap: 10px; padding: 13px; border: 1px solid var(--board-border); border-radius: 8px; }
+    .response-value { font-weight: 600; overflow-wrap: anywhere; }
+    .response-note { white-space: pre-wrap; overflow-wrap: anywhere; color: var(--board-muted); }
+    .command-line { display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: center; gap: 8px; }
+    .command-line code { display: block; padding: 8px; overflow-wrap: anywhere; color: var(--board-text); background: var(--board-bg); border-radius: 5px; }
+    .empty { padding: 25px 10px; text-align: center; color: var(--board-muted); }
+    .footer { position: fixed; z-index: 11; right: auto; bottom: 0; left: 50%; width: min(760px, calc(100% - 28px)); transform: translateX(-50%); display: flex; justify-content: center; gap: 8px; padding: 9px max(14px, env(safe-area-inset-right)) calc(9px + env(safe-area-inset-bottom)) max(14px, env(safe-area-inset-left)); border-top: 1px solid var(--board-border); background: var(--board-header); backdrop-filter: blur(10px); }
+    .footer wa-button { min-width: 0; }
+    .footer .send { margin-left: auto; }
+    .toast { position: fixed; z-index: 30; right: 14px; bottom: 74px; max-width: min(400px, calc(100% - 28px)); padding: 10px 13px; color: #fff; background: #27364a; border-radius: 7px; opacity: 0; transform: translateY(8px); pointer-events: none; transition: opacity .16s, transform .16s; }
+    .toast.show { opacity: 1; transform: translateY(0); }
+    .dialog-copy { display: grid; gap: 10px; }
+    .dialog-copy pre { max-height: 45vh; margin: 0; padding: 10px; white-space: pre-wrap; overflow-wrap: anywhere; overflow: auto; background: var(--board-bg); border: 1px solid var(--board-border); }
+    @media (max-width: 520px) {
+      .topbar { width: min(760px, calc(100% - 20px)); grid-template-columns: minmax(0, .45fr) minmax(0, .55fr) auto; gap: 7px; }
+      .topbar .cwd { display: block; }
+      main { width: min(100% - 20px, 760px); padding-top: 16px; }
+      .panel { padding: 13px; }
+      .option-columns, .metric-grid { grid-template-columns: 1fr; }
+      .footer { width: min(760px, calc(100% - 20px)); gap: 5px; }
+      .footer wa-button { flex: 1; }
+      .footer .send { margin-left: 0; }
+    }
+  </style>
+</head>
+<body>
+  <header class="topbar">
+    <div id="session" class="session"></div>
+    <div id="cwd" class="cwd"></div>
+    <div id="remaining"></div>
+  </header>
+  <main id="app" aria-live="polite"></main>
+  <footer id="footer" class="footer"></footer>
+  <div id="toast" class="toast" role="status"></div>
+  <wa-dialog id="paste-dialog" label="回答を渡してください">
+    <div class="dialog-copy">
+      <p>受け口がないため、次の本文をコピーしてエージェントへ渡してください。</p>
+      <pre id="paste-message"></pre>
+      <wa-copy-button id="paste-copy"></wa-copy-button>
+    </div>
+    <wa-button slot="footer" id="paste-close">閉じる</wa-button>
+  </wa-dialog>
+  <script id="board-snapshot" type="application/json">{}</script>
+  <script>
+    (() => {
+      'use strict';
+      const DAY = 24 * 60 * 60 * 1000;
+      const snapshotElement = document.getElementById('board-snapshot');
+      let snapshot = {};
+      try { snapshot = JSON.parse(snapshotElement.textContent || '{}'); } catch {}
+      let board = snapshot && snapshot.board ? snapshot : null;
+      let offline = false;
+      let renderedKey = '';
+      let charts = [];
+      let toastTimer;
+      const app = document.getElementById('app');
+      const footer = document.getElementById('footer');
+
+      function syncFooterSpace() {
+        document.documentElement.style.setProperty('--footer-height', `${footer.getBoundingClientRect().height}px`);
+      }
+      if (window.ResizeObserver) new ResizeObserver(syncFooterSpace).observe(footer);
+      window.addEventListener('resize', syncFooterSpace);
+      syncFooterSpace();
+
+      function syncTheme() {
+        const dark = window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches;
+        document.documentElement.classList.toggle('wa-dark', dark);
+        document.documentElement.classList.toggle('wa-light', !dark);
+      }
+      syncTheme();
+      if (window.matchMedia) window.matchMedia('(prefers-color-scheme: dark)').addEventListener('change', syncTheme);
+
+      function getStorage() {
+        try { return window.localStorage; } catch { return null; }
+      }
+      function storageEntries() {
+        const storage = getStorage();
+        if (!storage) return [];
+        const entries = [];
+        try {
+          for (let i = 0; i < storage.length; i += 1) {
+            const key = storage.key(i);
+            if (!key || !key.startsWith('dboard:')) continue;
+            let value;
+            try { value = JSON.parse(storage.getItem(key)); } catch { storage.removeItem(key); continue; }
+            entries.push({ key, value });
+          }
+        } catch {}
+        return entries;
+      }
+      function cleanStorage() {
+        const storage = getStorage();
+        if (!storage) return;
+        const cutoff = Date.now() - 14 * DAY;
+        const entries = storageEntries();
+        for (const entry of entries) {
+          if (!entry.value || typeof entry.value.savedAt !== 'number' || entry.value.savedAt < cutoff) {
+            try { storage.removeItem(entry.key); } catch {}
+          }
+        }
+        const current = storageEntries().sort((a, b) => a.value.savedAt - b.value.savedAt);
+        for (const entry of current.slice(0, Math.max(0, current.length - 100))) {
+          try { storage.removeItem(entry.key); } catch {}
+        }
+      }
+      function draftKey(itemId) { return board ? `dboard:${board.board.id}:${itemId}` : ''; }
+      function removeDraft(itemId) {
+        const storage = getStorage();
+        if (!storage || !draftKey(itemId)) return;
+        try { storage.removeItem(draftKey(itemId)); } catch {}
+      }
+      function readDraft(itemId) {
+        const storage = getStorage();
+        if (!storage || !draftKey(itemId)) return null;
+        try {
+          const value = JSON.parse(storage.getItem(draftKey(itemId)) || 'null');
+          if (!value || typeof value.savedAt !== 'number' || Date.now() - value.savedAt > 14 * DAY) {
+            storage.removeItem(draftKey(itemId));
+            return null;
+          }
+          return value;
+        } catch { return null; }
+      }
+      function saveDraft(item, value, note, state = 'draft') {
+        const storage = getStorage();
+        if (!storage || !board) return;
+        try {
+          storage.setItem(draftKey(item.id), JSON.stringify({ value, note, savedAt: Date.now(), state }));
+        } catch {}
+        cleanStorage();
+      }
+      function cleanClosedDrafts() {
+        if (!board) return;
+        for (const item of board.items || []) if (item.status !== 'open') removeDraft(item.id);
+        cleanStorage();
+      }
+      cleanStorage();
+
+      function text(value) {
+        const node = document.createElement('span');
+        node.textContent = value == null ? '' : String(value);
+        return node;
+      }
+      function node(tag, value, className) {
+        const element = document.createElement(tag);
+        if (value !== undefined && value !== null) element.textContent = String(value);
+        if (className) element.className = className;
+        return element;
+      }
+      function markdown(value) {
+        const element = document.createElement('div');
+        element.className = 'markdown';
+        const parser = window.marked && (window.marked.parse || (window.marked.marked && window.marked.marked.parse));
+        if (parser && window.DOMPurify) element.innerHTML = window.DOMPurify.sanitize(parser(String(value ?? '')));
+        else element.textContent = String(value ?? '');
+        return element;
+      }
+      function divider() { return document.createElement('wa-divider'); }
+      function dateText(value) {
+        const date = new Date(value);
+        if (Number.isNaN(date.getTime())) return '';
+        return new Intl.DateTimeFormat(undefined, { month: 'numeric', day: 'numeric', hour: '2-digit', minute: '2-digit', hour12: false }).format(date);
+      }
+      function isPasted(item) { const draft = readDraft(item.id); return item.status === 'open' && draft && draft.state === 'pasted'; }
+      function statusText(item) {
+        if (isPasted(item)) return '回答済み（未送達）';
+        if (item.status === 'open') return '未回答';
+        if (item.status === 'answered') return '回答済み（閉じ待ち）';
+        return '閉じた';
+      }
+      function statusClass(item) {
+        if (isPasted(item)) return 'pasted';
+        return item.status;
+      }
+      function sortedItems() {
+        if (!board) return [];
+        return [...(board.items || [])].sort((a, b) => {
+          const aOpen = a.status === 'open' && !isPasted(a);
+          const bOpen = b.status === 'open' && !isPasted(b);
+          if (aOpen !== bOpen) return aOpen ? -1 : 1;
+          if (aOpen && bOpen && (a.importance ?? 0) !== (b.importance ?? 0)) return (b.importance ?? 0) - (a.importance ?? 0);
+          return String(a.createdAt).localeCompare(String(b.createdAt));
+        });
+      }
+      function openItems() { return sortedItems().filter((item) => item.status === 'open' && !isPasted(item)); }
+      function currentRoute() {
+        const hash = location.hash || '#/list/decisions';
+        const parts = hash.replace(/^#\//, '').split('/');
+        if (parts[0] === 'q' && parts[1]) return { type: 'question', id: decodeURIComponent(parts[1]) };
+        if (parts[0] === 'r' && parts[1]) return { type: 'read', id: decodeURIComponent(parts[1]) };
+        if (parts[0] === 'list' && parts[1] === 'reads') return { type: 'list-reads' };
+        return { type: 'list-decisions' };
+      }
+      function go(hash) { if (location.hash === hash) render(); else location.hash = hash; }
+      function addTooltip(value, className, id) {
+        const anchor = node('span', value, className);
+        anchor.id = id;
+        const tooltip = document.createElement('wa-tooltip');
+        tooltip.setAttribute('trigger', 'click');
+        tooltip.setAttribute('for', id);
+        tooltip.append(text(value));
+        return { anchor, tooltip };
+      }
+      function renderHeader() {
+        const session = document.getElementById('session');
+        const cwd = document.getElementById('cwd');
+        const remaining = document.getElementById('remaining');
+        session.replaceChildren();
+        cwd.replaceChildren();
+        if (!board) {
+          session.textContent = '判断ボード';
+          remaining.textContent = '';
+          return;
+        }
+        const sessionTooltip = addTooltip(board.board.session, 'session', 'session-value');
+        const cwdTooltip = addTooltip(board.board.cwd, 'cwd', 'cwd-value');
+        session.append(sessionTooltip.anchor, sessionTooltip.tooltip);
+        cwd.append(cwdTooltip.anchor, cwdTooltip.tooltip);
+        const total = (board.items || []).length;
+        const remainingCount = openItems().length;
+        const badge = document.createElement('wa-badge');
+        badge.setAttribute('variant', remainingCount === 0 ? 'success' : 'neutral');
+        badge.textContent = remainingCount === 0 ? `すべて回答済み / ${total}` : `残り ${remainingCount} / ${total}`;
+        remaining.replaceChildren(badge);
+      }
+      function renderOffline() {
+        const old = document.querySelector('.offline');
+        if (old) old.remove();
+        if (offline) {
+          const banner = node('div', '受け口が動いていません。送信すると JSON を表示します（貼り付けて渡してください）', 'offline');
+          app.before(banner);
+        }
+      }
+      function renderTabs(active) {
+        const group = document.createElement('wa-tab-group');
+        group.className = 'tabs';
+        group.setAttribute('aria-label', '表示切り替え');
+        for (const [key, label, hash] of [['decisions', '判断', '#/list/decisions'], ['reads', 'よみもの', '#/list/reads']]) {
+          const waTab = document.createElement('wa-tab');
+          waTab.setAttribute('slot', 'nav');
+          waTab.classList.toggle('active', active === key);
+          waTab.textContent = label;
+          waTab.setAttribute('panel', key);
+          waTab.addEventListener('click', () => go(hash));
+          group.append(waTab);
+        }
+        return group;
+      }
+      function renderDecisionList() {
+        app.append(renderTabs('decisions'));
+        const panel = node('section', null, 'panel');
+        const items = sortedItems();
+        if (!items.length) panel.append(node('div', '判断はまだありません', 'empty'));
+        else {
+          const list = node('div', null, 'list');
+          for (const item of items) {
+            const row = node('button', null, 'list-row');
+            row.type = 'button';
+            const mark = node('span', statusText(item), `status-mark ${statusClass(item)}`);
+            const title = node('span', null, 'row-title');
+            title.append(text(item.title));
+            const meta = node('span', null, 'row-meta');
+            meta.append(mark);
+            if (item.importance != null) meta.append(node('span', '★'.repeat(item.importance), 'importance'));
+            meta.append(node('span', dateText(item.createdAt), 'row-date'));
+            row.append(title, meta);
+            row.addEventListener('click', () => go(`#/q/${encodeURIComponent(item.id)}`));
+            list.append(row);
+          }
+          panel.append(list);
+        }
+        app.append(panel);
+      }
+      function renderReadList() {
+        app.append(renderTabs('reads'));
+        const panel = node('section', null, 'panel');
+        if (!board.reads || !board.reads.length) panel.append(node('div', 'よみものはまだありません', 'empty'));
+        else {
+          const list = node('div', null, 'read-list');
+          for (const read of board.reads) {
+            const button = node('button', null, 'read-button');
+            button.type = 'button';
+            button.append(text(read.title), node('small', dateText(read.createdAt)));
+            button.addEventListener('click', () => go(`#/r/${encodeURIComponent(read.id)}`));
+            list.append(button);
+          }
+          panel.append(list);
+        }
+        app.append(panel);
+      }
+      function sectionTitle(parent, value) { if (value) parent.append(node('h3', value)); }
+      function renderSection(section, index) {
+        const wrapper = node('section');
+        if (section.type === 'text') {
+          sectionTitle(wrapper, section.heading);
+          wrapper.append(markdown(section.md));
+        } else if (section.type === 'callout') {
+          const callout = node('div', null, `callout ${section.variant}`);
+          callout.append(markdown(section.md));
+          wrapper.append(callout);
+        } else if (section.type === 'options') {
+          const grid = node('div', null, 'option-grid');
+          for (const option of section.items || []) {
+            const card = node('div', null, 'option-card');
+            const head = node('div', null, 'option-head');
+            head.append(node('strong', option.label));
+            if (option.recommended) {
+              const badge = document.createElement('wa-badge');
+              badge.setAttribute('variant', 'success');
+              badge.textContent = 'おすすめ';
+              head.append(badge);
+            }
+            card.append(head);
+            if (option.summary) card.append(node('p', option.summary));
+            const columns = node('div', null, 'option-columns');
+            const pros = node('div');
+            pros.append(node('strong', 'よい点'));
+            const prosList = node('ul');
+            for (const value of option.pros || []) prosList.append(node('li', value));
+            pros.append(prosList);
+            const cons = node('div');
+            cons.append(node('strong', '気になる点'));
+            const consList = node('ul');
+            for (const value of option.cons || []) consList.append(node('li', value));
+            cons.append(consList);
+            columns.append(pros, cons);
+            card.append(columns);
+            grid.append(card);
+          }
+          wrapper.append(grid);
+        } else if (section.type === 'table') {
+          sectionTitle(wrapper, section.heading);
+          const scroll = node('div', null, 'table-scroll');
+          const table = node('table');
+          const head = node('thead');
+          const tr = node('tr');
+          for (const column of section.columns || []) tr.append(node('th', column));
+          head.append(tr);
+          const body = node('tbody');
+          for (const row of section.rows || []) {
+            const rowNode = node('tr');
+            for (const value of row) rowNode.append(node('td', value));
+            body.append(rowNode);
+          }
+          table.append(head, body);
+          scroll.append(table);
+          wrapper.append(scroll);
+        } else if (section.type === 'chart') {
+          sectionTitle(wrapper, section.heading);
+          const scroll = node('div', null, 'chart-scroll');
+          const inner = node('div', null, 'chart-inner');
+          const canvas = document.createElement('canvas');
+          inner.append(canvas);
+          scroll.append(inner);
+          wrapper.append(scroll);
+          if (window.Chart) {
+            const theme = getComputedStyle(document.documentElement);
+            const colors = ['--wa-color-brand', '--wa-color-success', '--wa-color-warning', '--wa-color-danger', '--wa-color-neutral'].map((name, colorIndex) => theme.getPropertyValue(name).trim() || ['#3768a8', '#287d55', '#a16207', '#b42318', '#7c5bb4'][colorIndex]);
+            const chartData = section.chart;
+            const config = {
+              type: chartData.type,
+              data: { labels: chartData.labels, datasets: chartData.datasets.map((dataset, datasetIndex) => ({ ...dataset, backgroundColor: chartData.type === 'pie' || chartData.type === 'doughnut' ? colors : `${colors[datasetIndex % colors.length]}bb`, borderColor: colors[datasetIndex % colors.length], borderWidth: 2 })) },
+              options: { responsive: true, maintainAspectRatio: false, plugins: { legend: { labels: { color: getComputedStyle(document.documentElement).getPropertyValue('--board-text') } } }, scales: chartData.type === 'pie' || chartData.type === 'doughnut' ? {} : { x: { ticks: { color: getComputedStyle(document.documentElement).getPropertyValue('--board-muted') } }, y: { ticks: { color: getComputedStyle(document.documentElement).getPropertyValue('--board-muted') } } } },
+            };
+            charts.push(new window.Chart(canvas, config));
+          }
+        } else if (section.type === 'metric') {
+          const grid = node('div', null, 'metric-grid');
+          for (const metric of section.items || []) {
+            const card = node('div', null, 'metric');
+            card.append(node('div', metric.label, 'metric-label'));
+            const value = node('div', null, 'metric-value');
+            value.append(text(metric.value), text(metric.unit ? ` ${metric.unit}` : ''));
+            card.append(value);
+            if (metric.note) card.append(node('div', metric.note, 'metric-note'));
+            grid.append(card);
+          }
+          wrapper.append(grid);
+        } else {
+          wrapper.append(node('div', `表示できない種類: ${section.type}`, 'unknown-block'));
+        }
+        if (index > 0) app.append(divider());
+        app.append(wrapper);
+      }
+      function optionControl(answer, draft) {
+        const wrap = node('div', null, 'answer-control');
+        let control;
+        if (answer.type === 'choice' || answer.type === 'yesno') {
+          control = document.createElement('wa-radio-group');
+          const options = answer.type === 'choice' ? answer.options : [{ value: 'true', label: answer.yesLabel || 'はい' }, { value: 'false', label: answer.noLabel || 'いいえ' }];
+          if (options.length <= 4) control.setAttribute('orientation', 'horizontal');
+          control.className = `radio-options ${options.length > 4 ? 'vertical' : ''}`;
+          for (const option of options) {
+            const radio = document.createElement('wa-radio');
+            radio.setAttribute('value', option.value);
+            if (options.length <= 4) radio.setAttribute('appearance', 'button');
+            radio.textContent = option.label;
+            if (option.hint) radio.append(node('small', `（${option.hint}）`));
+            if (draft && ((answer.type === 'yesno' ? String(draft.value) : draft.value) === option.value)) radio.checked = true;
+            control.append(radio);
+          }
+        } else if (answer.type === 'multi') {
+          control = node('div', null, 'radio-options vertical');
+          for (const option of answer.options) {
+            const checkbox = document.createElement('wa-checkbox');
+            checkbox.setAttribute('value', option.value);
+            checkbox.textContent = option.label;
+            if (draft && Array.isArray(draft.value) && draft.value.includes(option.value)) checkbox.checked = true;
+            control.append(checkbox);
+          }
+        } else if (answer.type === 'rating') {
+          control = document.createElement('wa-rating');
+          control.setAttribute('max', String(answer.max || 5));
+          if (draft && draft.value != null) control.value = draft.value;
+        } else if (answer.type === 'scale') {
+          control = document.createElement('wa-slider');
+          control.setAttribute('min', String(answer.min));
+          control.setAttribute('max', String(answer.max));
+          control.setAttribute('step', String(answer.step || 1));
+          control.setAttribute('with-markers', '');
+          control.setAttribute('with-tooltip', '');
+          control.value = draft && draft.value != null ? draft.value : answer.min;
+        } else if (answer.type === 'number') {
+          control = document.createElement('wa-number-input');
+          if (answer.min !== undefined) control.setAttribute('min', String(answer.min));
+          if (answer.max !== undefined) control.setAttribute('max', String(answer.max));
+          if (answer.unit) control.setAttribute('label', answer.unit);
+          if (draft && draft.value != null) control.value = draft.value;
+        } else {
+          return null;
+        }
+        wrap.append(control);
+        if (answer.type === 'scale') {
+          const labels = node('div', null, 'range-labels');
+          labels.append(node('span', answer.minLabel || String(answer.min)), node('span', answer.maxLabel || String(answer.max)));
+          wrap.append(labels);
+        }
+        return { wrap, control };
+      }
+      function formValue(formState) {
+        const answer = formState.item.answer;
+        const control = formState.control;
+        if (answer.type === 'choice') return control.value || null;
+        if (answer.type === 'yesno') {
+          const value = control.value;
+          return value === 'true' ? true : value === 'false' ? false : null;
+        }
+        if (answer.type === 'multi') return [...control.querySelectorAll('wa-checkbox')].filter((checkbox) => checkbox.checked).map((checkbox) => checkbox.value);
+        if (answer.type === 'rating') return Number(control.value || 0);
+        if (answer.type === 'scale') return formState.scaleTouched ? Number(control.value) : null;
+        if (answer.type === 'number') return control.value === '' || control.value == null ? null : Number(control.value);
+        return null;
+      }
+      function formNote(formState) { return formState.note.value || ''; }
+      function answerReady(formState) {
+        const answer = formState.item.answer;
+        const value = formValue(formState);
+        const note = formNote(formState);
+        if (answer.type === 'choice') return value !== null;
+        if (answer.type === 'multi') return value.length >= (answer.min ?? 1) && (answer.max === undefined || value.length <= answer.max);
+        if (answer.type === 'rating') return value > 0;
+        if (answer.type === 'scale') return formState.scaleTouched;
+        if (answer.type === 'yesno') return value === true || value === false;
+        if (answer.type === 'number') return typeof value === 'number' && Number.isFinite(value);
+        return note.trim() !== '';
+      }
+      function saveForm(formState) {
+        saveDraft(formState.item, formValue(formState), formNote(formState));
+        updateSendButton(formState);
+      }
+      function updateSendButton(formState) {
+        const send = document.querySelector('#send-button');
+        if (send) send.disabled = !answerReady(formState);
+      }
+      function responseDisplay(item, localDraft) {
+        const view = node('div', null, 'response-view');
+        const value = item.response ? item.response.value : localDraft?.value;
+        const note = item.response ? item.response.note : localDraft?.note || '';
+        view.append(node('div', statusText(item), `status-mark ${statusClass(item)}`));
+        view.append(node('div', responseValueText(item, value), 'response-value'));
+        view.append(node('div', note.trim() ? note : '自由記入: なし', 'response-note'));
+        if (item.response) {
+          const command = board.board.commands.close.replaceAll('{id}', item.id);
+          const line = node('div', null, 'command-line');
+          line.append(node('code', command));
+          const copy = document.createElement('wa-copy-button');
+          copy.value = command;
+          line.append(copy);
+          view.append(node('div', '反映後に閉じてください。', 'note-label'), line);
+        }
+        return view;
+      }
+      function renderQuestion(item) {
+        app.append(node('h1', item.title));
+        for (const [index, section] of (item.sections || []).entries()) renderSection(section, index);
+        app.append(divider());
+        const answerBox = node('section', null, 'answer-box');
+        const pasted = isPasted(item);
+        if (item.status !== 'open' || pasted) {
+          answerBox.append(responseDisplay(item, pasted ? readDraft(item.id) : null));
+        } else {
+          const draft = readDraft(item.id);
+          if (item.answer.prompt) answerBox.append(node('p', item.answer.prompt, 'answer-prompt'));
+          let controlInfo;
+          if (item.answer.type === 'text') {
+            controlInfo = { wrap: node('div', null, 'answer-control'), control: null };
+          } else {
+            controlInfo = optionControl(item.answer, draft);
+            if (controlInfo) answerBox.append(controlInfo.wrap);
+          }
+          const note = document.createElement('wa-textarea');
+          note.setAttribute('label', item.answer.type === 'text' ? '回答' : '自由記入');
+          note.setAttribute('resize', 'auto');
+          note.value = draft?.note || '';
+          controlInfo = controlInfo || { control: null };
+          controlInfo.item = item;
+          controlInfo.note = note;
+          controlInfo.scaleTouched = item.answer.type === 'scale' && draft?.value != null;
+          if (item.answer.type === 'text') controlInfo.textAnswer = true;
+          answerBox.append(note);
+          const controls = controlInfo.control ? [controlInfo.control, note] : [note];
+          for (const control of controls) {
+            control.addEventListener('input', () => {
+              if (item.answer.type === 'scale' && control === controlInfo.control) controlInfo.scaleTouched = true;
+              saveForm(controlInfo);
+            });
+            control.addEventListener('change', () => {
+              if (item.answer.type === 'scale' && control === controlInfo.control) controlInfo.scaleTouched = true;
+              saveForm(controlInfo);
+            });
+          }
+          app.append(answerBox);
+          window.currentForm = controlInfo;
+        }
+      }
+      function responseValueText(item, value) {
+        const answer = item.answer;
+        if (answer.type === 'choice') return `回答: ${answer.options.find((option) => option.value === value)?.label || String(value ?? '')}`;
+        if (answer.type === 'multi') return `回答: ${(Array.isArray(value) ? value : []).map((part) => answer.options.find((option) => option.value === part)?.label || String(part)).join('、')}`;
+        if (answer.type === 'rating') return `回答: ★${value || 0}/${answer.max || 5}`;
+        if (answer.type === 'yesno') return `回答: ${value === true ? (answer.yesLabel || 'はい') : (answer.noLabel || 'いいえ')}`;
+        if (answer.type === 'text') return '回答: 自由記入';
+        return `回答: ${value == null ? '' : value}${answer.unit ? ` ${answer.unit}` : ''}`;
+      }
+      function renderRead(read) {
+        app.append(node('h1', read.title));
+        const panel = node('section', null, 'panel');
+        const loading = node('div', '読み込み中です。', 'empty');
+        panel.append(loading);
+        app.append(panel);
+        fetch(`./${read.file}`, { cache: 'no-store' }).then((response) => {
+          if (!response.ok) throw new Error('read');
+          return response.text();
+        }).then((body) => { panel.replaceChildren(markdown(body)); }).catch(() => { panel.replaceChildren(node('div', 'よみものを読み込めません。', 'empty')); });
+      }
+      function renderFooter(route) {
+        footer.replaceChildren();
+        const list = node('wa-button', '一覧へ');
+        list.setAttribute('variant', 'neutral');
+        const readRoute = route.type === 'read' || route.type === 'list-reads';
+        const listHash = readRoute ? '#/list/reads' : '#/list/decisions';
+        list.disabled = route.type === 'list-decisions' || route.type === 'list-reads';
+        list.addEventListener('click', () => go(listHash));
+        const previous = node('wa-button', '前へ');
+        previous.setAttribute('variant', 'neutral');
+        const next = node('wa-button', '次へ');
+        next.setAttribute('variant', 'neutral');
+        const targets = openItems();
+        const current = route.type === 'question' && board ? board.items.find((item) => item.id === route.id) : null;
+        let previousItem = null;
+        let nextItem = targets[0] || null;
+        if (current) {
+          const index = targets.findIndex((item) => item.id === current.id);
+          previousItem = index > 0 ? targets[index - 1] : null;
+          nextItem = index >= 0 && index < targets.length - 1 ? targets[index + 1] : null;
+          if (index < 0) {
+            const all = sortedItems();
+            const currentIndex = all.findIndex((item) => item.id === current.id);
+            previousItem = [...all.slice(0, currentIndex)].reverse().find((item) => targets.some((target) => target.id === item.id)) || null;
+            nextItem = all.slice(currentIndex + 1).find((item) => targets.some((target) => target.id === item.id)) || null;
+          }
+        }
+        previous.disabled = !previousItem;
+        next.disabled = !nextItem;
+        if (previousItem) previous.addEventListener('click', () => go(`#/q/${encodeURIComponent(previousItem.id)}`));
+        if (nextItem) next.addEventListener('click', () => go(`#/q/${encodeURIComponent(nextItem.id)}`));
+        footer.append(list, previous, next);
+        if (current && current.status === 'open' && !isPasted(current)) {
+          const send = node('wa-button', '送信');
+          send.id = 'send-button';
+          send.setAttribute('variant', 'brand');
+          send.className = 'send';
+          send.disabled = !window.currentForm || !answerReady(window.currentForm);
+          send.addEventListener('click', () => submitAnswer(current, window.currentForm));
+          footer.append(send);
+        }
+        syncFooterSpace();
+        window.requestAnimationFrame(syncFooterSpace);
+      }
+      function showToast(message) {
+        const toast = document.getElementById('toast');
+        toast.textContent = message;
+        toast.classList.add('show');
+        clearTimeout(toastTimer);
+        toastTimer = setTimeout(() => toast.classList.remove('show'), 3200);
+      }
+      function buildLocalMessage(item, formState) {
+        const value = item.answer.type === 'text' ? null : formValue(formState);
+        const note = formNote(formState);
+        const answeredAt = new Date().toISOString();
+        const json = JSON.stringify({ boardId: board.board.id, id: item.id, value, note, answeredAt });
+        const display = responseValueText(item, value).replace(/^回答: /, '');
+        return `[decision-board] 回答が届きました: ${item.id} 「${item.title}」\n回答: ${display}\n自由記入: ${note.trim() ? note : 'なし'}\nJSON: ${json}\n\nこの回答を反映し終えたら、次のコマンドで閉じてください（HTML は自動で更新されます。HTML を手で直さないでください）:\n${board.board.commands.close.replaceAll('{id}', item.id)}`;
+      }
+      async function submitAnswer(item, formState) {
+        if (!formState || !answerReady(formState)) return;
+        const value = item.answer.type === 'text' ? null : formValue(formState);
+        const note = formNote(formState);
+        const payload = { id: item.id, value, note };
+        const beforeTargets = openItems();
+        const beforeIndex = beforeTargets.findIndex((candidate) => candidate.id === item.id);
+        const nextBeforeUpdate = beforeIndex >= 0 ? beforeTargets[beforeIndex + 1] : null;
+        try {
+          const response = await fetch('./api/answer', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) });
+          if (!response.ok) throw new Error('offline');
+          const result = await response.json();
+          const current = board.items.find((candidate) => candidate.id === item.id);
+          if (current) Object.assign(current, result.item);
+          removeDraft(item.id);
+          showToast(result.notified === true ? '送りました（エージェントに知らせ済み）' : result.notified === null ? '送りました（知らせる設定なし）' : '送りました（知らせに失敗しました）');
+          if (nextBeforeUpdate) go(`#/q/${encodeURIComponent(nextBeforeUpdate.id)}`); else go('#/list/decisions');
+        } catch {
+          const message = buildLocalMessage(item, formState);
+          saveDraft(item, value, note, 'pasted');
+          document.getElementById('paste-message').textContent = message;
+          const copy = document.getElementById('paste-copy');
+          copy.value = message;
+          const dialog = document.getElementById('paste-dialog');
+          dialog.open = true;
+          render();
+        }
+      }
+      function render() {
+        charts.forEach((chart) => chart.destroy());
+        charts = [];
+        window.currentForm = null;
+        renderHeader();
+        app.replaceChildren();
+        const route = currentRoute();
+        if (!board) app.append(node('div', 'board.json を読み込めません。', 'empty'));
+        else if (route.type === 'list-decisions') renderDecisionList();
+        else if (route.type === 'list-reads') renderReadList();
+        else if (route.type === 'question') {
+          const item = board.items.find((candidate) => candidate.id === route.id);
+          if (item) renderQuestion(item); else app.append(node('div', '判断が見つかりません。', 'empty'));
+        } else {
+          const read = (board.reads || []).find((candidate) => candidate.id === route.id);
+          if (read) renderRead(read); else app.append(node('div', 'よみものが見つかりません。', 'empty'));
+        }
+        renderOffline();
+        renderFooter(route);
+      }
+      async function fetchBoard() {
+        try {
+          const response = await fetch('./board.json', { cache: 'no-store' });
+          if (!response.ok) throw new Error('board');
+          const incoming = await response.json();
+          const changed = !board || board.board.updatedAt !== incoming.board.updatedAt;
+          const wasOffline = offline;
+          board = incoming;
+          offline = false;
+          cleanClosedDrafts();
+          if (changed || wasOffline) render();
+        } catch {
+          if (!board && snapshot && snapshot.board) board = snapshot;
+          if (!offline) { offline = true; render(); }
+        }
+      }
+      window.addEventListener('hashchange', render);
+      document.getElementById('paste-close').addEventListener('click', () => { document.getElementById('paste-dialog').open = false; });
+      document.addEventListener('visibilitychange', () => { if (!document.hidden) fetchBoard(); });
+      render();
+      fetchBoard();
+      setInterval(fetchBoard, 5000);
+    })();
+  </script>
+</body>
+</html>
