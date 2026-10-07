@@ -110,8 +110,13 @@
     .empty { padding: 25px 10px; text-align: center; color: var(--board-muted); }
     .footer { position: fixed; z-index: 11; right: auto; bottom: 0; left: 50%; width: min(760px, calc(100% - 28px)); transform: translateX(-50%); display: flex; justify-content: space-between; gap: 0; padding: 0 0 env(safe-area-inset-bottom); border-top: 1px solid var(--board-border); background: var(--board-header); backdrop-filter: blur(10px); }
     .footer .nav-group, .footer .action-group { display: flex; align-items: stretch; gap: 0; min-width: 0; min-height: 48px; }
+    .footer .nav-group { flex: 0 0 auto; }
+    .footer .action-group { flex: 1 1 auto; justify-content: flex-end; }
     .footer wa-button { min-width: 64px; height: 48px; white-space: nowrap; }
     .footer wa-button::part(base) { height: 100%; padding-inline: 20px; border-radius: 0; white-space: nowrap; }
+    .footer #cancel-button { flex: 0 0 auto; }
+    .footer #send-button { flex: 1 1 auto; max-width: 240px; }
+    .footer #send-button::part(base) { width: 100%; justify-content: center; }
     .footer wa-divider[orientation="vertical"] { --spacing: 0; align-self: stretch; display: block; }
     .toast { position: fixed; z-index: 30; right: 14px; bottom: 74px; max-width: min(400px, calc(100% - 28px)); padding: 10px 13px; color: #fff; background: #27364a; border-radius: 7px; opacity: 0; transform: translateY(8px); pointer-events: none; transition: opacity .16s, transform .16s; }
     .toast.show { opacity: 1; transform: translateY(0); }
