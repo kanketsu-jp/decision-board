@@ -1,29 +1,6 @@
-# Third-party notices
-
-## yomiyasu
-
-この作業の一部は、[yomiyasu](https://github.com/nanaism/yomiyasu) の基本原則、語彙カタログ、検査スクリプトを元にしています。
-
-派生・書き換えたファイル:
-
-- `references/writing.md`: yomiyasu の基本原則と語彙カタログを、判断を求める文向けに書き換えたもの
-- `scripts/text_lint.py`: `yomiyasu_lint.py` を元に、判断ボードのJSON走査と検査を加えたもの
-
-このリポジトリに同梱する単体 Skill の派生物:
-
-- `skills/clear-japanese/SKILL.md`
-- `skills/clear-japanese/references/slop-catalog.md`
-- `skills/clear-japanese/references/gemini-syntax.md`
-- `skills/clear-japanese/references/domains/tech.md`
-- `skills/clear-japanese/references/domains/business.md`
-- `skills/clear-japanese/references/domains/essay.md`
-- `skills/clear-japanese/references/summarize.md`
-- `skills/clear-japanese/scripts/yomiyasu_lint.py`
-- `skills/clear-japanese/scripts/yomiyasu_diff.py`
-- `skills/clear-japanese/LICENSE`
-Copyright (c) 2026 nanaism
-
 MIT License
+
+Copyright (c) 2026 nanaism
 
 Permission is hereby granted, free of charge, to any person obtaining a copy
 of this software and associated documentation files (the "Software"), to deal

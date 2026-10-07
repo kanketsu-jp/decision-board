@@ -32,6 +32,11 @@ npx skills add <owner>/decision-board
 
 手で入れる場合は、`skills` ディレクトリにこのリポジトリを置きます。
 
+## 同梱の単体 Skill
+
+文章の推敲・要約には、同梱の単体 Skill を使えます。
+導入は `npx skills add <owner>/decision-board --skill clear-japanese` です。
+
 ## 使い方
 
 詳細は [SKILL.md](SKILL.md) を参照してください。流れは次のとおりです。
