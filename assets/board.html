@@ -108,24 +108,23 @@
     .command-line { display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: center; gap: 8px; }
     .command-line code { display: block; padding: 8px; overflow-wrap: anywhere; color: var(--board-text); background: var(--board-bg); border-radius: 5px; }
     .empty { padding: 25px 10px; text-align: center; color: var(--board-muted); }
-    .footer { position: fixed; z-index: 11; right: auto; bottom: 0; left: 50%; width: min(760px, calc(100% - 28px)); transform: translateX(-50%); display: flex; justify-content: center; gap: 8px; padding: 9px max(14px, env(safe-area-inset-right)) calc(9px + env(safe-area-inset-bottom)) max(14px, env(safe-area-inset-left)); border-top: 1px solid var(--board-border); background: var(--board-header); backdrop-filter: blur(10px); }
-    .footer wa-button { min-width: 0; }
-    .footer .cancel { margin-left: auto; }
-    .footer .send { margin-left: 0; }
+    .footer { position: fixed; z-index: 11; right: auto; bottom: 0; left: 50%; width: min(760px, calc(100% - 28px)); transform: translateX(-50%); display: flex; justify-content: space-between; gap: 0; padding: 0 0 env(safe-area-inset-bottom); border-top: 1px solid var(--board-border); background: var(--board-header); backdrop-filter: blur(10px); }
+    .footer .nav-group, .footer .action-group { display: flex; align-items: stretch; gap: 0; min-width: 0; min-height: 48px; }
+    .footer wa-button { min-width: 0; height: 48px; white-space: nowrap; }
+    .footer wa-button::part(base) { height: 100%; padding-inline: 10px; border-radius: 0; white-space: nowrap; }
+    .footer wa-divider[orientation="vertical"] { --spacing: 0; align-self: stretch; display: block; }
     .toast { position: fixed; z-index: 30; right: 14px; bottom: 74px; max-width: min(400px, calc(100% - 28px)); padding: 10px 13px; color: #fff; background: #27364a; border-radius: 7px; opacity: 0; transform: translateY(8px); pointer-events: none; transition: opacity .16s, transform .16s; }
     .toast.show { opacity: 1; transform: translateY(0); }
     .dialog-copy { display: grid; gap: 10px; }
     .dialog-copy pre { max-height: 45vh; margin: 0; padding: 10px; white-space: pre-wrap; overflow-wrap: anywhere; overflow: auto; background: var(--board-bg); border: 1px solid var(--board-border); }
     @media (max-width: 520px) {
-      .topbar { width: min(760px, calc(100% - 20px)); grid-template-columns: minmax(0, .45fr) minmax(0, .55fr) auto; gap: 7px; }
+      .topbar { width: 100%; grid-template-columns: minmax(0, .45fr) minmax(0, .55fr) auto; gap: 7px; padding-left: calc(12px + env(safe-area-inset-left)); padding-right: calc(12px + env(safe-area-inset-right)); }
       .topbar .cwd { display: block; }
-      main { width: min(100% - 20px, 760px); padding-top: 16px; }
-      .panel { padding: 13px; }
+      main { width: 100%; padding-top: 16px; padding-right: calc(12px + env(safe-area-inset-right)); padding-left: calc(12px + env(safe-area-inset-left)); }
+      .panel { margin-right: calc(-12px - env(safe-area-inset-right)); margin-left: calc(-12px - env(safe-area-inset-left)); padding: 13px; border-right: 0; border-left: 0; border-radius: 0; }
       .option-columns, .metric-grid { grid-template-columns: 1fr; }
-      .footer { width: min(760px, calc(100% - 20px)); gap: 5px; }
-      .footer wa-button { flex: 1; }
-      .footer .cancel { margin-left: 0; }
-      .footer .send { margin-left: 0; }
+      .footer { left: 0; width: 100%; transform: none; }
+      .footer wa-button::part(base) { padding-inline: 7px; }
     }
   </style>
 </head>
@@ -807,6 +806,11 @@
           panel.replaceChildren(markdown(body));
         }).catch(() => { panel.replaceChildren(node('div', 'よみものを読み込めません。', 'empty')); });
       }
+      function footerDivider() {
+        const separator = divider();
+        separator.setAttribute('orientation', 'vertical');
+        return separator;
+      }
       function renderFooter(route) {
         footer.replaceChildren();
         const list = node('wa-button', '一覧へ');
@@ -850,12 +854,14 @@
         next.disabled = !nextTarget;
         if (previousTarget) previous.addEventListener('click', () => go(`${readRoute ? '#/r/' : '#/q/'}${encodeURIComponent(previousTarget.id)}`));
         if (nextTarget) next.addEventListener('click', () => go(`${readRoute ? '#/r/' : '#/q/'}${encodeURIComponent(nextTarget.id)}`));
-        footer.append(list, previous, next);
+        const navGroup = node('div', null, 'nav-group');
+        navGroup.append(list, footerDivider(), previous, footerDivider(), next);
+        footer.append(navGroup);
         if (current && current.status === 'open' && !isPasted(current)) {
           const cancel = node('wa-button', '取消');
           cancel.id = 'cancel-button';
           cancel.setAttribute('variant', 'neutral');
-          cancel.setAttribute('appearance', 'outlined');
+          cancel.setAttribute('appearance', 'filled');
           cancel.className = 'cancel';
           cancel.disabled = !window.currentForm || !hasAnswerValue(window.currentForm);
           cancel.addEventListener('click', () => cancelAnswer(window.currentForm));
@@ -865,7 +871,9 @@
           send.className = 'send';
           send.disabled = !window.currentForm || (!isRecommendationMode(window.currentForm) && !answerReady(window.currentForm));
           send.addEventListener('click', () => submitAnswer(current, window.currentForm));
-          footer.append(cancel, send);
+          const actionGroup = node('div', null, 'action-group');
+          actionGroup.append(cancel, footerDivider(), send);
+          footer.append(actionGroup);
           updateSendButton(window.currentForm);
         }
         syncFooterSpace();
