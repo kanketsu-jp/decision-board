@@ -64,7 +64,7 @@ node <skill>/scripts/board.mjs read --dir .temp/bord --file x.md --title "<タ�
 node <skill>/scripts/board.mjs serve --dir .temp/bord --open
 ```
 
-受け口は `127.0.0.1` だけで待ち受けます。外へ出す必要がある場合は、環境のトンネルの手順で `url` のポートを公開します。この Skill はトンネルを持ちません。チャットに残すのは結論 1 行と URL です。
+受け口は `127.0.0.1` だけで待ち受けます。外（トンネル）から開くときは、トンネルで受け口のポートを公開し、その URL を `serve --public-url <URL>` で渡します。指定した URL 以外の Host / Origin は 403 のままです。公開した URL には認証（例: アクセス制御サービス）をかけることを勧めます。チャットに残すのは結論 1 行と URL です。
 
 ## 回答が届いたら
 

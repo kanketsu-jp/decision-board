@@ -39,8 +39,8 @@ function request(port, requestPath, { method = 'GET', body, headers = {} } = {})
   });
 }
 
-async function startServer(dir) {
-  const child = spawn(process.execPath, [script, 'serve', '--dir', dir], { cwd: root, stdio: ['ignore', 'pipe', 'pipe'] });
+async function startServer(dir, args = []) {
+  const child = spawn(process.execPath, [script, 'serve', '--dir', dir, ...args], { cwd: root, stdio: ['ignore', 'pipe', 'pipe'] });
   const meta = await waitFor(async () => {
     try { return JSON.parse(await fs.readFile(path.join(dir, '.server.json'), 'utf8')); } catch { return null; }
   });
@@ -298,6 +298,64 @@ test('推奨値の検証と推奨送信', async () => {
     const records = (await fs.readFile(path.join(dir, 'answers.jsonl'), 'utf8')).trim().split('\n').map((line) => JSON.parse(line));
     assert.equal(records.find((record) => record.id === 'q-1').byRecommendation, true);
     assert.equal(Object.hasOwn(records.find((record) => record.id === 'q-2'), 'byRecommendation'), false);
+  } finally {
+    if (serverProcess && !serverProcess.killed) {
+      serverProcess.kill('SIGTERM');
+      await new Promise((resolve) => serverProcess.once('exit', resolve));
+    }
+    await fs.rm(dir, { recursive: true, force: true });
+  }
+});
+
+test('公開 URL の許可と受け口比較', async () => {
+  const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'bord-public-url-'));
+  let serverProcess;
+  try {
+    let result = run(['init', '--dir', dir, '--session', '公開 URL 試験', '--cwd', dir]);
+    assert.equal(result.status, 0, result.stderr);
+    const itemPath = path.join(dir, 'item.json');
+    await fs.writeFile(itemPath, JSON.stringify({ title: '公開回答', sections: [], answer: { type: 'yesno' } }));
+    result = run(['add', '--dir', dir, '--file', itemPath]);
+    assert.equal(result.status, 0, result.stderr);
+
+    const publicArgs = ['--public-url', 'https://board.example.test', '--public-url', 'https://a.example.test', '--public-url', 'https://b.example.test'];
+    for (const invalidUrl of ['ftp://x', 'https://u:p@x.example.test', 'https://x.example.test/path', 'https://x.example.test/?q=1']) {
+      result = run(['serve', '--dir', dir, '--public-url', invalidUrl]);
+      assert.equal(result.status, 2, `${invalidUrl}: ${result.stderr}`);
+      assert.match(result.stderr, /使い方/);
+    }
+
+    const server = await startServer(dir, publicArgs);
+    serverProcess = server.child;
+    const port = server.meta.port;
+    assert.deepEqual(server.meta.publicUrls, ['https://board.example.test', 'https://a.example.test', 'https://b.example.test']);
+
+    for (const host of ['board.example.test', 'a.example.test', 'b.example.test']) {
+      const response = await request(port, '/', { headers: { Host: host } });
+      assert.equal(response.status, 200, host);
+    }
+    let response = await request(port, '/', { headers: { Host: 'evil.example.test' } });
+    assert.equal(response.status, 403);
+    response = await request(port, '/', { headers: { Host: 'board.example.test.evil.test' } });
+    assert.equal(response.status, 403);
+    response = await request(port, '/', { headers: { Host: 'evil.board.example.test' } });
+    assert.equal(response.status, 403);
+    response = await request(port, '/api/answer', { method: 'POST', headers: { Host: 'board.example.test', Origin: 'https://evil.example.test', 'Content-Type': 'application/json' }, body: JSON.stringify({ id: 'q-1', value: true, note: '' }) });
+    assert.equal(response.status, 403);
+    response = await request(port, '/api/answer', { method: 'POST', headers: { Host: 'board.example.test', Origin: 'https://board.example.test', 'Content-Type': 'application/json' }, body: JSON.stringify({ id: 'q-1', value: true, note: '' }) });
+    assert.equal(response.status, 200, response.body);
+
+    result = run(['url', '--dir', dir]);
+    assert.equal(result.status, 0, result.stderr);
+    assert.deepEqual(result.stdout.trim().split('\n'), [server.meta.url, ...publicArgs.filter((value) => value.startsWith('https://'))]);
+
+    result = run(['serve', '--dir', dir, '--public-url', 'https://b.example.test', '--public-url', 'https://board.example.test', '--public-url', 'https://a.example.test']);
+    assert.equal(result.status, 0, result.stderr);
+    result = run(['serve', '--dir', dir, '--public-url', 'https://other.example.test']);
+    assert.equal(result.status, 1);
+    assert.match(result.stderr, /既に動いています。公開 URL を変えるには stop してから serve し直してください/);
+    result = run(['serve', '--dir', dir]);
+    assert.equal(result.status, 0, result.stderr);
   } finally {
     if (serverProcess && !serverProcess.killed) {
       serverProcess.kill('SIGTERM');

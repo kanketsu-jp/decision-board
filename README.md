@@ -43,6 +43,9 @@ npx skills add <owner>/decision-board
 5. 回答が届いたら、通知本文の close コマンドをそのまま実行します。
 6. `list` と `answers` で状態を確認します。
 
+トンネル経由で開くときは `serve --public-url https://board.example.test --open` のように指定します。
+指定した公開 URL 以外の Host / Origin は 403 のままです。公開 URL には認証をかけてください。
+
 デモは次のコマンドです。
 
 ```sh
@@ -54,7 +57,7 @@ node examples/demo.mjs --open
 - `board.json` が参照元で、HTML は描くだけです。
 - 回答はローカルの受け口が受けて `board.json` に書きます。
 - 通知には、エージェントが実行する close コマンドを入れます。これで「回答したのに HTML に反映されない」問題をなくします。
-- 受け口は `127.0.0.1` のみで待ち受け、Host と Origin を検査します。
+- 受け口は `127.0.0.1` のみで待ち受け、指定した公開 URL を除き Host と Origin を検査します。
 - Markdown は `marked` で変換し、`DOMPurify` で無害化します。
 
 ## 使っているもの

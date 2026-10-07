@@ -53,7 +53,13 @@ function parseArgs(argv) {
     if (args.length === 0 || args[0].startsWith('--')) {
       throw new BoardError(`引数がありません: ${key}`);
     }
-    options[name] = args.shift();
+    const value = args.shift();
+    if (name === 'public-url') {
+      if (!Array.isArray(options[name])) options[name] = [];
+      options[name].push(value);
+    } else {
+      options[name] = value;
+    }
   }
   return { command, options };
 }
@@ -76,7 +82,7 @@ function usage() {
     '  reopen --dir <d> --id <id>',
     '  list --dir <d> [--json]',
     '  answers --dir <d>',
-    '  serve --dir <d> [--port <n>] [--open]',
+    '  serve --dir <d> [--port <n>] [--open] [--public-url <URL> ...]',
     '  url --dir <d>',
     '  stop --dir <d>',
   ].join('\n');
@@ -541,12 +547,37 @@ function openUrl(url) {
   } catch {}
 }
 
-function allowedHost(host, port) {
-  return host === `127.0.0.1:${port}` || host === `localhost:${port}`;
+function normalizePublicUrl(value) {
+  if (typeof value !== 'string' || !/^https?:\/\//i.test(value)) throw new BoardError('--public-url が不正です');
+  let url;
+  try {
+    url = new URL(value);
+  } catch {
+    throw new BoardError('--public-url が不正です');
+  }
+  if (!['http:', 'https:'].includes(url.protocol) || url.pathname !== '/' || url.search !== '' || url.hash !== '' || url.username !== '' || url.password !== '') {
+    throw new BoardError('--public-url が不正です');
+  }
+  return url.origin;
 }
 
-function allowedOrigin(origin, port) {
-  return origin === undefined || origin === `http://127.0.0.1:${port}` || origin === `http://localhost:${port}`;
+function normalizePublicUrls(values) {
+  if (!Array.isArray(values)) return [];
+  return values.map((value) => normalizePublicUrl(value));
+}
+
+function sameStringSet(left, right) {
+  const leftSet = new Set(left);
+  const rightSet = new Set(right);
+  return leftSet.size === rightSet.size && [...leftSet].every((value) => rightSet.has(value));
+}
+
+function allowedHost(host, port, publicUrls = []) {
+  return host === `127.0.0.1:${port}` || host === `localhost:${port}` || publicUrls.some((publicUrl) => host === new URL(publicUrl).host);
+}
+
+function allowedOrigin(origin, port, publicUrls = []) {
+  return origin === undefined || origin === `http://127.0.0.1:${port}` || origin === `http://localhost:${port}` || publicUrls.some((publicUrl) => origin === publicUrl);
 }
 
 function responseValueText(item, value) {
@@ -657,7 +688,7 @@ function decodedReadPath(rawPath) {
   return rest;
 }
 
-function makeServer(dir) {
+function makeServer(dir, publicUrls = []) {
   let postQueue = Promise.resolve();
   const server = http.createServer((req, res) => {
     const rawPath = String(req.url ?? '/').split('?')[0];
@@ -677,12 +708,12 @@ function makeServer(dir) {
       textResponse(res, status, body, type, headers);
     };
     const port = server.address()?.port;
-    if (!allowedHost(req.headers.host, port)) {
+    if (!allowedHost(req.headers.host, port, publicUrls)) {
       replyJson(403, { error: 'Host が不正です' });
       return;
     }
     if (req.method === 'POST' && rawPath === '/api/answer') {
-      if (!allowedOrigin(req.headers.origin, port)) {
+      if (!allowedOrigin(req.headers.origin, port, publicUrls)) {
         replyJson(403, { error: 'Origin が不正です' });
         return;
       }
@@ -777,15 +808,22 @@ function makeServer(dir) {
 async function commandServe(options) {
   const dir = resolvedDir(options);
   const metaPath = path.join(dir, '.server.json');
+  const publicUrls = normalizePublicUrls(options['public-url']);
   const previous = await existingServer(metaPath);
   if (previous) {
+    if (options['public-url'] !== undefined) {
+      const previousPublicUrls = normalizePublicUrls(previous.publicUrls);
+      if (!sameStringSet(previousPublicUrls, publicUrls)) {
+        throw new BoardError('既に動いています。公開 URL を変えるには stop してから serve し直してください', 1);
+      }
+    }
     if (options.open) openUrl(previous.url);
     process.stdout.write(`既に動いています: ${previous.url}\n`);
     return;
   }
   const portValue = options.port === undefined ? 0 : Number(options.port);
   if (!Number.isInteger(portValue) || portValue < 0 || portValue > 65535) throw new BoardError('--port が不正です');
-  const server = makeServer(dir);
+  const server = makeServer(dir, publicUrls);
   await new Promise((resolve, reject) => {
     const onError = (error) => {
       server.off('listening', onListening);
@@ -802,7 +840,7 @@ async function commandServe(options) {
   const address = server.address();
   const port = typeof address === 'object' && address ? address.port : portValue;
   const url = `http://127.0.0.1:${port}/`;
-  await atomicWrite(metaPath, `${JSON.stringify({ pid: process.pid, port, url, startedAt: now() }, null, 2)}\n`);
+  await atomicWrite(metaPath, `${JSON.stringify({ pid: process.pid, port, url, publicUrls, startedAt: now() }, null, 2)}\n`);
   process.stdout.write(`起動しました: ${url}\n`);
   if (options.open) openUrl(url);
   await new Promise((resolve) => {
@@ -825,6 +863,8 @@ async function commandUrl(options) {
     const meta = await readJson(path.join(dir, '.server.json'));
     if (typeof meta.url !== 'string') throw new Error('invalid');
     process.stdout.write(`${meta.url}\n`);
+    const publicUrls = Array.isArray(meta.publicUrls) ? meta.publicUrls : [];
+    for (const publicUrl of publicUrls) process.stdout.write(`${publicUrl}\n`);
   } catch {
     throw new BoardError('受け口は動いていません', 1);
   }
