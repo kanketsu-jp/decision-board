@@ -364,3 +364,19 @@ test('公開 URL の許可と受け口比較', async () => {
     await fs.rm(dir, { recursive: true, force: true });
   }
 });
+
+test('シンボリックリンク経由の CLI init', async () => {
+  const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'bord-link-'));
+  try {
+    const linkedRoot = path.join(dir, 'linked-repository');
+    const boardDir = path.join(dir, 'board');
+    await fs.symlink(root, linkedRoot, 'dir');
+    const linkedScript = path.join(linkedRoot, 'scripts', 'board.mjs');
+    const result = spawnSync(process.execPath, [linkedScript, 'init', '--dir', boardDir, '--session', 'リンク試験', '--cwd', dir], { cwd: root, encoding: 'utf8' });
+    assert.equal(result.status, 0, result.stderr);
+    const board = JSON.parse(await fs.readFile(path.join(boardDir, 'board.json'), 'utf8'));
+    assert.equal(board.board.session, 'リンク試験');
+  } finally {
+    await fs.rm(dir, { recursive: true, force: true });
+  }
+});

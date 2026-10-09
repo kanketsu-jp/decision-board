@@ -924,7 +924,14 @@ async function main(argv = process.argv.slice(2)) {
   }
 }
 
-if (process.argv[1] && path.resolve(process.argv[1]) === SCRIPT_PATH) {
+const INVOKED_SCRIPT_PATH = process.argv[1] ? path.resolve(process.argv[1]) : null;
+let directInvocation = INVOKED_SCRIPT_PATH === SCRIPT_PATH;
+if (INVOKED_SCRIPT_PATH) {
+  try {
+    directInvocation = fssync.realpathSync(INVOKED_SCRIPT_PATH) === fssync.realpathSync(SCRIPT_PATH);
+  } catch {}
+}
+if (directInvocation) {
   await main();
 }
 

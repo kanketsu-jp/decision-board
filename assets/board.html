@@ -59,6 +59,7 @@
     .status-mark.answered { color: var(--wa-color-brand); }
     .status-mark.closed { color: var(--board-muted); }
     .status-mark.pasted { color: var(--wa-color-warning); }
+    .status-mark.danger { color: var(--wa-color-danger); }
     .row-meta { display: flex; align-items: center; flex-wrap: wrap; gap: 8px; min-width: 0; color: var(--board-muted); font-size: .78rem; white-space: normal; }
     .read-list { display: grid; gap: 8px; }
     .read-button { width: 100%; padding: 12px 13px; border: 1px solid var(--board-border); border-radius: 8px; color: inherit; background: var(--board-panel); text-align: left; cursor: pointer; }
@@ -150,6 +151,10 @@
     </div>
     <wa-button slot="footer" id="paste-close">閉じる</wa-button>
   </wa-dialog>
+  <wa-dialog id="json-dialog" label="localStorage の JSON">
+    <div id="json-dialog-content"></div>
+    <wa-button slot="footer" id="json-close">閉じる</wa-button>
+  </wa-dialog>
   <script id="board-snapshot" type="application/json">{}</script>
   <script>
     (() => {
@@ -160,6 +165,8 @@
       try { snapshot = JSON.parse(snapshotElement.textContent || '{}'); } catch {}
       let board = snapshot && snapshot.board ? snapshot : null;
       let offline = false;
+      let serverReachable = false;
+      let submitting = null;
       let renderedKey = '';
       let charts = [];
       let toastTimer;
@@ -232,11 +239,14 @@
           return value;
         } catch { return null; }
       }
-      function saveDraft(item, value, note, state = 'draft') {
+      function saveDraft(item, value, note, state = 'draft', extra = {}) {
         const storage = getStorage();
         if (!storage || !board) return;
         try {
-          storage.setItem(draftKey(item.id), JSON.stringify({ value, note, savedAt: Date.now(), state }));
+          const draft = { value, note, savedAt: Date.now(), state };
+          if (extra.failedAt !== undefined) draft.failedAt = extra.failedAt;
+          if (extra.error !== undefined) draft.error = extra.error;
+          storage.setItem(draftKey(item.id), JSON.stringify(draft));
         } catch {}
         cleanStorage();
       }
@@ -363,14 +373,17 @@
         if (Number.isNaN(date.getTime())) return '';
         return new Intl.DateTimeFormat(undefined, { month: 'numeric', day: 'numeric', hour: '2-digit', minute: '2-digit', hour12: false }).format(date);
       }
+      function isFailed(item) { const draft = readDraft(item.id); return item.status === 'open' && draft && draft.state === 'failed'; }
       function isPasted(item) { const draft = readDraft(item.id); return item.status === 'open' && draft && draft.state === 'pasted'; }
       function statusText(item) {
+        if (isFailed(item)) return '送信失敗';
         if (isPasted(item)) return '回答済み（未送達）';
         if (item.status === 'open') return '未回答';
         if (item.status === 'answered') return '回答済み（閉じ待ち）';
         return '閉じた';
       }
       function statusClass(item) {
+        if (isFailed(item)) return 'danger';
         if (isPasted(item)) return 'pasted';
         return item.status;
       }
@@ -449,7 +462,11 @@
         return group;
       }
       function renderDecisionList() {
-        app.append(renderTabs('decisions'));
+        const jsonButton = node('wa-button', 'JSON を写す');
+        jsonButton.setAttribute('size', 'small');
+        jsonButton.setAttribute('variant', 'neutral');
+        jsonButton.addEventListener('click', openJsonDialog);
+        app.append(jsonButton, renderTabs('decisions'));
         const panel = node('section', null, 'panel');
         const items = sortedItems();
         if (!items.length) panel.append(node('div', '判断はまだありません', 'empty'));
@@ -695,10 +712,10 @@
         if (send) {
           send.textContent = recommendation ? '推奨' : '送信';
           send.setAttribute('variant', recommendation ? 'success' : 'brand');
-          send.disabled = !recommendation && !answerReady(formState);
+          send.disabled = submitting !== null || (!recommendation && !answerReady(formState));
         }
         const cancel = document.querySelector('#cancel-button');
-        if (cancel) cancel.disabled = !hasAnswerValue(formState);
+        if (cancel) cancel.disabled = submitting !== null || !hasAnswerValue(formState);
       }
       function cancelAnswer(formState) {
         if (!formState) return;
@@ -748,6 +765,9 @@
           answerBox.append(responseDisplay(item, pasted ? readDraft(item.id) : null));
         } else {
           const draft = readDraft(item.id);
+          if (draft?.state === 'failed') {
+            answerBox.append(node('div', `前回の送信は失敗しました: ${draft.error || '送信に失敗しました'}（${dateText(draft.failedAt)}）`, 'callout danger'));
+          }
           if (item.answer.prompt) answerBox.append(node('p', item.answer.prompt, 'answer-prompt'));
           if (item.answer.recommended !== undefined) {
             const recommendation = responseValueText(item, item.answer.recommended).replace(/^回答: /, '');
@@ -818,12 +838,13 @@
       }
       function renderFooter(route) {
         footer.replaceChildren();
+        const isSubmitting = submitting !== null;
         const list = node('wa-button', '一覧へ');
         list.setAttribute('variant', 'neutral');
         const readRoute = route.type === 'read' || route.type === 'list-reads';
         const listHash = readRoute ? '#/list/reads' : '#/list/decisions';
-        list.disabled = route.type === 'list-decisions' || route.type === 'list-reads';
-        list.addEventListener('click', () => go(listHash));
+        list.disabled = isSubmitting || route.type === 'list-decisions' || route.type === 'list-reads';
+        if (!list.disabled) list.addEventListener('click', () => go(listHash));
         const previous = node('wa-button', '前へ');
         previous.setAttribute('variant', 'neutral');
         const next = node('wa-button', '次へ');
@@ -855,10 +876,10 @@
             }
           }
         }
-        previous.disabled = !previousTarget;
-        next.disabled = !nextTarget;
-        if (previousTarget) previous.addEventListener('click', () => go(`${readRoute ? '#/r/' : '#/q/'}${encodeURIComponent(previousTarget.id)}`));
-        if (nextTarget) next.addEventListener('click', () => go(`${readRoute ? '#/r/' : '#/q/'}${encodeURIComponent(nextTarget.id)}`));
+        previous.disabled = isSubmitting || !previousTarget;
+        next.disabled = isSubmitting || !nextTarget;
+        if (previousTarget && !isSubmitting) previous.addEventListener('click', () => go(`${readRoute ? '#/r/' : '#/q/'}${encodeURIComponent(previousTarget.id)}`));
+        if (nextTarget && !isSubmitting) next.addEventListener('click', () => go(`${readRoute ? '#/r/' : '#/q/'}${encodeURIComponent(nextTarget.id)}`));
         const navGroup = node('div', null, 'nav-group');
         navGroup.append(list, footerDivider(), previous, footerDivider(), next);
         footer.append(navGroup);
@@ -868,14 +889,15 @@
           cancel.setAttribute('variant', 'neutral');
           cancel.setAttribute('appearance', 'filled');
           cancel.className = 'cancel';
-          cancel.disabled = !window.currentForm || !hasAnswerValue(window.currentForm);
-          cancel.addEventListener('click', () => cancelAnswer(window.currentForm));
+          cancel.disabled = isSubmitting || !window.currentForm || !hasAnswerValue(window.currentForm);
+          if (!isSubmitting) cancel.addEventListener('click', () => cancelAnswer(window.currentForm));
           const send = node('wa-button', '送信');
           send.id = 'send-button';
           send.setAttribute('variant', 'brand');
           send.className = 'send';
-          send.disabled = !window.currentForm || (!isRecommendationMode(window.currentForm) && !answerReady(window.currentForm));
-          send.addEventListener('click', () => submitAnswer(current, window.currentForm));
+          send.disabled = isSubmitting || !window.currentForm || (!isRecommendationMode(window.currentForm) && !answerReady(window.currentForm));
+          if (isSubmitting && submitting === current.id) send.setAttribute('loading', '');
+          if (!isSubmitting) send.addEventListener('click', () => submitAnswer(current, window.currentForm));
           const actionGroup = node('div', null, 'action-group');
           actionGroup.append(cancel, footerDivider(), send);
           footer.append(actionGroup);
@@ -901,8 +923,75 @@
         const display = `${responseValueText(item, value).replace(/^回答: /, '')}${byRecommendation ? '（推奨をそのまま採用）' : ''}`;
         return `[decision-board] 回答が届きました: ${item.id} 「${item.title}」\n回答: ${display}\n自由記入: ${note.trim() ? note : 'なし'}\nJSON: ${json}\n\nこの回答を反映し終えたら、次のコマンドで閉じてください（HTML は自動で更新されます。HTML を手で直さないでください）:\n${board.board.commands.close.replaceAll('{id}', item.id)}`;
       }
+      function saveFailedDraft(item, value, note, error) {
+        saveDraft(item, value, note, 'failed', { failedAt: new Date().toISOString(), error });
+      }
+      function isoValue(value) {
+        if (value == null) return null;
+        const date = new Date(value);
+        return Number.isNaN(date.getTime()) ? null : date.toISOString();
+      }
+      function localJsonRecord(item, draft) {
+        const response = item.response || {};
+        const hasDraft = Boolean(draft);
+        return {
+          boardId: board.board.id,
+          id: item.id,
+          title: item.title,
+          status: item.status,
+          localState: hasDraft ? draft.state || null : null,
+          value: hasDraft ? draft.value ?? null : response.value ?? null,
+          note: hasDraft ? draft.note ?? null : response.note ?? null,
+          savedAt: hasDraft ? isoValue(draft.savedAt) : null,
+          failedAt: hasDraft ? isoValue(draft.failedAt) : null,
+          error: hasDraft ? draft.error ?? null : null,
+          closeCommand: board.board.commands.close.replaceAll('{id}', item.id),
+        };
+      }
+      function collectLocalJson() {
+        const failed = [];
+        const notClosed = [];
+        const storageAvailable = Boolean(getStorage());
+        for (const item of board.items || []) {
+          const draft = storageAvailable ? readDraft(item.id) : null;
+          const failedLocal = item.status === 'open' && draft?.state === 'failed';
+          const record = localJsonRecord(item, draft);
+          if (failedLocal) failed.push(record);
+          else if (item.status !== 'closed') notClosed.push(record);
+        }
+        return { failed, notClosed, all: [...failed, ...notClosed], storageAvailable };
+      }
+      function openJsonDialog() {
+        if (!board) return;
+        const dialog = document.getElementById('json-dialog');
+        const content = document.getElementById('json-dialog-content');
+        const collected = collectLocalJson();
+        const wrapper = node('div', null, 'dialog-copy');
+        if (!collected.storageAvailable) wrapper.append(node('p', 'この端末では保存が使えません'));
+        const group = document.createElement('wa-tab-group');
+        group.setAttribute('value', 'failed');
+        for (const [key, label] of [['failed', '失敗'], ['notClosed', '閉じてない'], ['all', 'すべて']]) {
+          const records = collected[key];
+          const tab = node('wa-tab', `${label} ${records.length} 件`);
+          tab.setAttribute('slot', 'nav');
+          tab.setAttribute('panel', key);
+          const panel = document.createElement('wa-tab-panel');
+          panel.setAttribute('name', key);
+          panel.append(node('div', `${records.length} 件`, 'note-label'));
+          const json = JSON.stringify(records, null, 2);
+          const pre = document.createElement('pre');
+          pre.textContent = json;
+          const copy = document.createElement('wa-copy-button');
+          copy.value = json;
+          panel.append(pre, copy);
+          group.append(tab, panel);
+        }
+        wrapper.append(group);
+        content.replaceChildren(wrapper);
+        dialog.open = true;
+      }
       async function submitAnswer(item, formState) {
-        if (!formState) return;
+        if (submitting !== null || !formState) return;
         const byRecommendation = isRecommendationMode(formState);
         if (!byRecommendation && !answerReady(formState)) return;
         const value = byRecommendation ? item.answer.recommended : item.answer.type === 'text' ? null : formValue(formState);
@@ -912,18 +1001,63 @@
         const beforeTargets = openItems();
         const beforeIndex = beforeTargets.findIndex((candidate) => candidate.id === item.id);
         const nextBeforeUpdate = beforeIndex >= 0 ? beforeTargets[beforeIndex + 1] : null;
+        submitting = item.id;
+        renderFooter(currentRoute());
+        const controller = new AbortController();
+        let timeoutId = setTimeout(() => controller.abort(), 30000);
         try {
-          const response = await fetch('./api/answer', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) });
-          if (!response.ok) throw new Error('offline');
-          const result = await response.json();
+          const response = await fetch('./api/answer', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload), signal: controller.signal });
+          clearTimeout(timeoutId);
+          timeoutId = null;
+          if (!response.ok) {
+            let responseError = null;
+            try {
+              const responseBody = await response.json();
+              responseError = typeof responseBody?.error === 'string' && responseBody.error.trim() ? responseBody.error : null;
+            } catch {}
+            if (response.status === 409) {
+              submitting = null;
+              showToast('この判断はもう回答済みです');
+              await fetchBoard();
+              render();
+              return;
+            }
+            const reason = responseError ? `HTTP ${response.status}: ${responseError}` : `HTTP ${response.status}`;
+            saveFailedDraft(item, value, note, reason);
+            submitting = null;
+            render();
+            showToast(`送れませんでした: ${reason}`);
+            return;
+          }
+          let result;
+          try {
+            result = await response.json();
+          } catch {
+            submitting = null;
+            await fetchBoard();
+            if (nextBeforeUpdate) go(`#/q/${encodeURIComponent(nextBeforeUpdate.id)}`); else go('#/list/decisions');
+            showToast('送りました');
+            return;
+          }
           const current = board.items.find((candidate) => candidate.id === item.id);
           if (current) Object.assign(current, result.item);
           removeDraft(item.id);
           showToast(result.notified === true ? '送りました（エージェントに知らせ済み）' : result.notified === null ? '送りました（知らせる設定なし）' : '送りました（知らせに失敗しました）');
+          submitting = null;
           if (nextBeforeUpdate) go(`#/q/${encodeURIComponent(nextBeforeUpdate.id)}`); else go('#/list/decisions');
-        } catch {
+        } catch (error) {
+          const aborted = error?.name === 'AbortError';
+          if (aborted) {
+            saveFailedDraft(item, value, note, '受け口が応答しません');
+            submitting = null;
+            render();
+            showToast('受け口が応答しません');
+            return;
+          }
           const message = buildLocalMessage(item, formState, byRecommendation);
-          saveDraft(item, value, note, 'pasted');
+          if (serverReachable) saveFailedDraft(item, value, note, '受け口に届きませんでした');
+          else saveDraft(item, value, note, 'pasted');
+          submitting = null;
           document.getElementById('paste-message').textContent = message;
           const copy = document.getElementById('paste-copy');
           copy.value = message;
@@ -931,6 +1065,7 @@
           dialog.open = true;
           render();
         }
+        finally { if (timeoutId !== null) clearTimeout(timeoutId); }
       }
       function render() {
         charts.forEach((chart) => chart.destroy());
@@ -960,6 +1095,7 @@
           const changed = !board || board.board.updatedAt !== incoming.board.updatedAt;
           const wasOffline = offline;
           board = incoming;
+          serverReachable = true;
           offline = false;
           cleanClosedDrafts();
           if (changed || wasOffline) render();
@@ -970,6 +1106,7 @@
       }
       window.addEventListener('hashchange', render);
       document.getElementById('paste-close').addEventListener('click', () => { document.getElementById('paste-dialog').open = false; });
+      document.getElementById('json-close').addEventListener('click', () => { document.getElementById('json-dialog').open = false; });
       document.addEventListener('visibilitychange', () => { if (!document.hidden) fetchBoard(); });
       render();
       fetchBoard();
