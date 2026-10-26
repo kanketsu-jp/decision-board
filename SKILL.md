@@ -50,6 +50,22 @@ node <skill>/scripts/board.mjs add --dir .temp/bord --file item.json
 
 文面の lint がエラー 0 件になってから `add` を実行します。文面の規則は `references/writing.md` に従います。
 
+## 区分に分ける
+
+判断が2系統以上に分かれるとき（たとえば、ある案件の判断とそれ以外）が区分を使う場面です。区分名は前後の空白を除いて1〜30文字です。
+
+```sh
+node <skill>/scripts/board.mjs add --dir .temp/bord --file item.json --group "<区分>"
+node <skill>/scripts/board.mjs group --dir .temp/bord --id q-3 --id q-4 --group "<区分>"
+node <skill>/scripts/board.mjs group --dir .temp/bord --id q-3 --clear
+node <skill>/scripts/board.mjs groups --dir .temp/bord --set '["<区分A>","<区分B>"]'
+node <skill>/scripts/board.mjs groups --dir .temp/bord
+```
+
+`add --group` は item.json の `group` より優先されます。`group` は `--id` を何度でも指定でき、`--clear` で区分を外せます。`groups --set '[]'` は表示順を消す指定です。`groups` は保存した表示順と item に付いた区分名を1行1件で表示し、`--json` では配列を出します。item が0件の区分も表示されます。
+
+区分がある判断は、区分ごとの折りたたみで表示される構成です。既定の状態は開いたままです。「その他」は区分のない item の入れ物として表示されます。よみものは区分しません。
+
 ## よみものを足す
 
 回答を求めない Markdown は、よみものとして追加します。
@@ -86,6 +102,8 @@ node <skill>/scripts/board.mjs reopen --dir .temp/bord --id <id>
 node <skill>/scripts/board.mjs list --dir .temp/bord
 node <skill>/scripts/board.mjs answers --dir .temp/bord
 ```
+
+区分付きの item が1件でもあると、`list` の行末に区分の列が付きます（区分なしは「その他」です）。
 
 ## してはいけないこと
 

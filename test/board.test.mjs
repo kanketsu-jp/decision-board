@@ -380,3 +380,95 @@ test('シンボリックリンク経由の CLI init', async () => {
     await fs.rm(dir, { recursive: true, force: true });
   }
 });
+
+test('区分（group）', async () => {
+  const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'bord-board-'));
+  try {
+    let result = run(['init', '--dir', dir, '--session', '区分試験', '--cwd', dir]);
+    assert.equal(result.status, 0, result.stderr);
+
+    const baseItem = { title: '区分を試す', sections: [{ type: 'text', md: '確認します。' }], answer: { type: 'yesno' } };
+    const basePath = path.join(dir, 'item.json');
+    await fs.writeFile(basePath, JSON.stringify(baseItem));
+    result = run(['add', '--dir', dir, '--file', basePath]);
+    assert.equal(result.status, 0, result.stderr);
+    let board = JSON.parse(await fs.readFile(path.join(dir, 'board.json'), 'utf8'));
+    assert.equal(Object.hasOwn(board.items[0], 'group'), false);
+
+    await fs.writeFile(basePath, JSON.stringify({ ...baseItem, group: '乙' }));
+    result = run(['add', '--dir', dir, '--file', basePath, '--group', ' 丙 ']);
+    assert.equal(result.status, 0, result.stderr);
+    result = run(['add', '--dir', dir, '--file', basePath, '--group', ' 甲 ']);
+    assert.equal(result.status, 0, result.stderr);
+    board = JSON.parse(await fs.readFile(path.join(dir, 'board.json'), 'utf8'));
+    assert.equal(board.items[1].group, '丙');
+    assert.equal(board.items[2].group, '甲');
+
+    const thirty = 'あ'.repeat(30);
+    result = run(['add', '--dir', dir, '--file', basePath, '--group', thirty]);
+    assert.equal(result.status, 0, result.stderr);
+    board = JSON.parse(await fs.readFile(path.join(dir, 'board.json'), 'utf8'));
+    assert.equal(board.items[3].group, thirty);
+    const itemCount = board.items.length;
+    result = run(['add', '--dir', dir, '--file', basePath, '--group', 'あ'.repeat(31)]);
+    assert.equal(result.status, 2);
+    board = JSON.parse(await fs.readFile(path.join(dir, 'board.json'), 'utf8'));
+    assert.equal(board.items.length, itemCount);
+    await fs.writeFile(basePath, JSON.stringify({ ...baseItem, group: null }));
+    result = run(['add', '--dir', dir, '--file', basePath]);
+    assert.equal(result.status, 2);
+    board = JSON.parse(await fs.readFile(path.join(dir, 'board.json'), 'utf8'));
+    assert.equal(board.items.length, itemCount);
+
+    result = run(['group', '--dir', dir, '--id', 'q-1', '--id', 'q-2', '--group', ' 乙 ']);
+    assert.equal(result.status, 0, result.stderr);
+    board = JSON.parse(await fs.readFile(path.join(dir, 'board.json'), 'utf8'));
+    assert.equal(board.items.find((item) => item.id === 'q-1').group, '乙');
+    assert.equal(board.items.find((item) => item.id === 'q-2').group, '乙');
+    const unchanged = await fs.readFile(path.join(dir, 'board.json'), 'utf8');
+    result = run(['group', '--dir', dir, '--id', 'q-1', '--id', 'q-99', '--group', '丙']);
+    assert.equal(result.status, 1);
+    assert.equal(await fs.readFile(path.join(dir, 'board.json'), 'utf8'), unchanged);
+    result = run(['group', '--dir', dir, '--id', 'q-1', '--clear']);
+    assert.equal(result.status, 0, result.stderr);
+    board = JSON.parse(await fs.readFile(path.join(dir, 'board.json'), 'utf8'));
+    assert.equal(Object.hasOwn(board.items.find((item) => item.id === 'q-1'), 'group'), false);
+    result = run(['group', '--dir', dir, '--id', 'q-1', '--group', '乙', '--clear']);
+    assert.equal(result.status, 2);
+
+    result = run(['groups', '--dir', dir, '--set', '["乙","甲"]']);
+    assert.equal(result.status, 0, result.stderr);
+    board = JSON.parse(await fs.readFile(path.join(dir, 'board.json'), 'utf8'));
+    assert.deepEqual(board.groups, ['乙', '甲']);
+    result = run(['groups', '--dir', dir, '--json']);
+    assert.equal(result.status, 0, result.stderr);
+    assert.deepEqual(JSON.parse(result.stdout), ['乙', '甲', thirty, 'その他']);
+    result = run(['groups', '--dir', dir, '--set', '["甲","甲"]']);
+    assert.equal(result.status, 2);
+    result = run(['groups', '--dir', dir, '--set', 'x']);
+    assert.equal(result.status, 2);
+    result = run(['groups', '--dir', dir, '--set', '[]']);
+    assert.equal(result.status, 0, result.stderr);
+    board = JSON.parse(await fs.readFile(path.join(dir, 'board.json'), 'utf8'));
+    assert.equal(Object.hasOwn(board, 'groups'), false);
+
+    result = run(['list', '--dir', dir]);
+    assert.equal(result.status, 0, result.stderr);
+    const groupedLines = result.stdout.trim().split('\n').map((line) => line.split('\t'));
+    assert.equal(groupedLines.length, 4);
+    assert.equal(groupedLines.every((columns) => columns.length === 4), true);
+    assert.equal(groupedLines.find((columns) => columns[0] === 'q-1')[3], 'その他');
+    result = run(['group', '--dir', dir, '--id', 'q-1', '--id', 'q-2', '--id', 'q-3', '--id', 'q-4', '--clear']);
+    assert.equal(result.status, 0, result.stderr);
+    result = run(['list', '--dir', dir]);
+    assert.equal(result.status, 0, result.stderr);
+    assert.equal(result.stdout.trim().split('\n').every((line) => line.split('\t').length === 3), true);
+
+    result = run(['close', '--dir', dir, '--id', 'q-1']);
+    assert.equal(result.status, 0, result.stderr);
+    board = JSON.parse(await fs.readFile(path.join(dir, 'board.json'), 'utf8'));
+    assert.equal(board.items.find((item) => item.id === 'q-1').status, 'closed');
+  } finally {
+    await fs.rm(dir, { recursive: true, force: true });
+  }
+});

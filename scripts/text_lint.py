@@ -84,7 +84,7 @@ NEGATIVE_PARALLELISM_PATTERN = re.compile(r"([^。、]+)ではなく、?([^。�
 # 判断ボードの構造値は文章として検査しない。
 BOARD_EXCLUDED_KEYS = {
     "id", "status", "type", "variant", "value", "createdAt",
-    "answeredAt", "closedAt", "key",
+    "answeredAt", "closedAt", "key", "group",
 }
 BOARD_ANSWER_TYPES = {"choice", "multi", "rating", "scale", "yesno", "number", "text"}
 

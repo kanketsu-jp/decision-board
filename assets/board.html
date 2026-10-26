@@ -50,6 +50,11 @@
     h3 { margin: 0 0 8px; font-size: 1rem; }
     .panel { padding: 16px; background: var(--board-panel); border: 1px solid var(--board-border); border-radius: 10px; }
     .list { display: grid; gap: 8px; }
+    .groups { display: grid; gap: 12px; }
+    details.group { border: 1px solid var(--board-border); border-radius: 8px; }
+    summary.group-summary { display: flex; justify-content: space-between; gap: 8px; padding: 10px 12px; cursor: pointer; font-weight: 600; }
+    .group-count { color: var(--board-muted); font-size: .8rem; font-weight: 400; white-space: nowrap; }
+    details.group > .list { padding: 0 10px 10px; }
     .list-row { display: grid; grid-template-columns: minmax(0, 1fr); align-items: start; gap: 6px; width: 100%; min-width: 0; height: auto !important; padding: 12px 13px; text-align: left; color: inherit; background: var(--board-panel); border: 1px solid var(--board-border); border-radius: 8px; cursor: pointer; }
     .list-row:hover { border-color: var(--wa-color-brand); }
     .list-row > * { min-width: 0; }
@@ -109,6 +114,7 @@
     .command-line { display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: center; gap: 8px; }
     .command-line code { display: block; padding: 8px; overflow-wrap: anywhere; color: var(--board-text); background: var(--board-bg); border-radius: 5px; }
     .empty { padding: 25px 10px; text-align: center; color: var(--board-muted); }
+    .question-group { color: var(--board-muted); font-size: .8rem; margin: 0 0 4px; }
     .footer { position: fixed; z-index: 11; right: auto; bottom: 0; left: 50%; width: min(760px, calc(100% - 28px)); transform: translateX(-50%); display: flex; justify-content: space-between; gap: 0; padding: 0 0 env(safe-area-inset-bottom); border-top: 1px solid var(--board-border); background: var(--board-header); backdrop-filter: blur(10px); }
     .footer .nav-group, .footer .action-group { display: flex; align-items: stretch; gap: 0; min-width: 0; min-height: 48px; }
     .footer .nav-group { flex: 0 0 auto; }
@@ -128,6 +134,7 @@
       .topbar .cwd { display: block; }
       main { width: 100%; padding-top: 16px; padding-right: calc(12px + env(safe-area-inset-right)); padding-left: calc(12px + env(safe-area-inset-left)); }
       .panel { margin-right: calc(-12px - env(safe-area-inset-right)); margin-left: calc(-12px - env(safe-area-inset-left)); padding: 13px; border-right: 0; border-left: 0; border-radius: 0; }
+      .group-name { min-width: 0; overflow-wrap: anywhere; }
       .option-columns, .metric-grid { grid-template-columns: 1fr; }
       .footer { left: 0; width: 100%; transform: none; }
       .footer wa-button::part(base) { padding-inline: 16px; }
@@ -397,7 +404,66 @@
           return String(a.createdAt).localeCompare(String(b.createdAt));
         });
       }
-      function openItems() { return sortedItems().filter((item) => item.status === 'open' && !isPasted(item)); }
+      function hasGroups() {
+        return Boolean(board && (board.items || []).some((item) => typeof item?.group === 'string' && item.group.trim()));
+      }
+      function groupNameOf(item) {
+        return typeof item?.group === 'string' && item.group.trim() ? item.group.trim() : 'その他';
+      }
+      function groupOrder() {
+        if (!board) return [];
+        const items = board.items || [];
+        const names = [];
+        const seen = new Set();
+        const add = (name) => {
+          if (!seen.has(name) && items.some((item) => groupNameOf(item) === name)) {
+            seen.add(name);
+            names.push(name);
+          }
+        };
+        if (Array.isArray(board.groups)) {
+          for (const name of board.groups) if (typeof name === 'string') add(name);
+        }
+        for (const item of items) {
+          if (typeof item?.group === 'string' && item.group.trim()) add(item.group.trim());
+        }
+        if (items.some((item) => !(typeof item?.group === 'string' && item.group.trim()))) add('その他');
+        return names;
+      }
+      function displayItems() {
+        if (!hasGroups()) return sortedItems();
+        const items = sortedItems();
+        return groupOrder().flatMap((name) => items.filter((item) => groupNameOf(item) === name));
+      }
+      function groupStateKey() {
+        return board && board.board ? `dboard-groups:${board.board.id}` : '';
+      }
+      function readCollapsedGroups() {
+        try {
+          const storage = getStorage();
+          const key = groupStateKey();
+          if (!storage || !key) return new Set();
+          const value = JSON.parse(storage.getItem(key) || 'null');
+          if (!value || !Array.isArray(value.collapsed) || value.collapsed.some((name) => typeof name !== 'string')) return new Set();
+          return new Set(value.collapsed);
+        } catch {
+          return new Set();
+        }
+      }
+      function saveGroupState(name, open) {
+        try {
+          const storage = getStorage();
+          const key = groupStateKey();
+          if (!storage || !key) return;
+          const collapsed = readCollapsedGroups();
+          const alreadyCollapsed = collapsed.has(name);
+          if (open === !alreadyCollapsed) return;
+          if (open) collapsed.delete(name);
+          else collapsed.add(name);
+          storage.setItem(key, JSON.stringify({ collapsed: [...collapsed] }));
+        } catch {}
+      }
+      function openItems() { return displayItems().filter((item) => item.status === 'open' && !isPasted(item)); }
       function currentRoute() {
         const hash = location.hash || '#/list/decisions';
         const parts = hash.replace(/^#\//, '').split('/');
@@ -468,6 +534,42 @@
         jsonButton.addEventListener('click', openJsonDialog);
         app.append(jsonButton, renderTabs('decisions'));
         const panel = node('section', null, 'panel');
+        if (hasGroups()) {
+          const groups = node('div', null, 'groups');
+          const orderedItems = sortedItems();
+          const openIds = new Set(openItems().map((item) => item.id));
+          const collapsed = readCollapsedGroups();
+          for (const groupName of groupOrder()) {
+            const groupItems = orderedItems.filter((item) => groupNameOf(item) === groupName);
+            const details = node('details', null, 'group');
+            details.open = !collapsed.has(groupName);
+            details.addEventListener('toggle', (event) => saveGroupState(groupName, event.currentTarget.open));
+            const summary = node('summary', null, 'group-summary');
+            summary.append(node('span', groupName, 'group-name'));
+            const openCount = groupItems.filter((item) => openIds.has(item.id)).length;
+            summary.append(node('span', openCount === 0 ? `すべて回答済み / ${groupItems.length}` : `未回答 ${openCount} / ${groupItems.length}`, 'group-count'));
+            const list = node('div', null, 'list');
+            for (const item of groupItems) {
+              const row = node('button', null, 'list-row');
+              row.type = 'button';
+              const mark = node('span', statusText(item), `status-mark ${statusClass(item)}`);
+              const title = node('span', null, 'row-title');
+              title.append(text(item.title));
+              const meta = node('span', null, 'row-meta');
+              meta.append(mark);
+              if (item.importance != null) meta.append(node('span', '★'.repeat(item.importance), 'importance'));
+              meta.append(node('span', dateText(item.createdAt), 'row-date'));
+              row.append(title, meta);
+              row.addEventListener('click', () => go(`#/q/${encodeURIComponent(item.id)}`));
+              list.append(row);
+            }
+            details.append(summary, list);
+            groups.append(details);
+          }
+          panel.append(groups);
+          app.append(panel);
+          return;
+        }
         const items = sortedItems();
         if (!items.length) panel.append(node('div', '判断はまだありません', 'empty'));
         else {
@@ -756,6 +858,7 @@
         return view;
       }
       function renderQuestion(item) {
+        if (hasGroups()) app.append(node('div', groupNameOf(item), 'question-group'));
         app.append(node('h1', item.title));
         for (const [index, section] of (item.sections || []).entries()) renderSection(section, index);
         app.append(divider());
@@ -869,7 +972,7 @@
             previousTarget = index > 0 ? targets[index - 1] : null;
             nextTarget = index >= 0 && index < targets.length - 1 ? targets[index + 1] : null;
             if (index < 0) {
-              const all = sortedItems();
+              const all = displayItems();
               const currentIndex = all.findIndex((item) => item.id === current.id);
               previousTarget = [...all.slice(0, currentIndex)].reverse().find((item) => targets.some((target) => target.id === item.id)) || null;
               nextTarget = all.slice(currentIndex + 1).find((item) => targets.some((target) => target.id === item.id)) || null;

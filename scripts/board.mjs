@@ -41,7 +41,7 @@ function parseArgs(argv) {
   const args = [...argv];
   const command = args.shift();
   const options = {};
-  const flags = new Set(['open', 'json']);
+  const flags = new Set(['open', 'json', 'clear']);
   while (args.length > 0) {
     const key = args.shift();
     if (!key.startsWith('--')) throw new BoardError(`不明な引数です: ${key}`);
@@ -57,6 +57,10 @@ function parseArgs(argv) {
     if (name === 'public-url') {
       if (!Array.isArray(options[name])) options[name] = [];
       options[name].push(value);
+    } else if (name === 'id') {
+      if (!Array.isArray(options.ids)) options.ids = [];
+      options.ids.push(value);
+      options.id = value;
     } else {
       options[name] = value;
     }
@@ -76,7 +80,9 @@ function usage() {
   return [
     '使い方: node scripts/board.mjs <command> ...',
     '  init --dir <d> --session <s> --cwd <p> [--inbox <JSON配列>]',
-    '  add --dir <d> --file <item.json>',
+    '  add --dir <d> --file <item.json> [--group <区分>]',
+    '  group --dir <d> --id <id> [--id <id> ...] (--group <区分> | --clear)',
+    '  groups --dir <d> [--json] [--set <JSON配列>]',
     '  read --dir <d> --file <x.md> --title <t>',
     '  close --dir <d> --id <id> [--note <文>]',
     '  reopen --dir <d> --id <id>',
@@ -334,12 +340,22 @@ function validateAnswer(answer) {
   }
 }
 
+function validateGroupName(value, label) {
+  if (typeof value !== 'string') throw new BoardError(`${label} は 1〜30 文字にしてください`);
+  const trimmed = value.trim();
+  if ([...trimmed].length < 1 || [...trimmed].length > 30) {
+    throw new BoardError(`${label} は 1〜30 文字にしてください`);
+  }
+  return trimmed;
+}
+
 function validateItemInput(item) {
   if (!isObject(item)) throw new BoardError('item はオブジェクトで指定してください');
   requireString(item.title, 'title');
   if (item.importance !== undefined && item.importance !== null && (!Number.isInteger(item.importance) || item.importance < 1 || item.importance > 5)) {
     throw new BoardError('importance は 1〜5 または null にしてください');
   }
+  if (item.group !== undefined) validateGroupName(item.group, 'group');
   validateSections(item.sections);
   validateAnswer(item.answer);
 }
@@ -412,6 +428,9 @@ async function commandAdd(options) {
     throw new BoardError('入力 JSON が不正です');
   }
   validateItemInput(input);
+  const group = options.group !== undefined
+    ? validateGroupName(options.group, '--group')
+    : input.group === undefined ? undefined : validateGroupName(input.group, 'group');
   const board = await loadBoard(dir);
   const number = nextNumber(board.items.map((item) => item.id), 'q');
   const item = {
@@ -420,6 +439,7 @@ async function commandAdd(options) {
     status: 'open',
     createdAt: now(),
     importance: input.importance ?? null,
+    ...(group === undefined ? {} : { group }),
     sections: input.sections,
     answer: input.answer,
     response: null,
@@ -457,6 +477,77 @@ function findItem(board, id) {
   return item;
 }
 
+async function commandGroup(options) {
+  const dir = resolvedDir(options);
+  const ids = options.ids ?? [];
+  if (ids.length === 0) throw new BoardError('--id が 1 つもありません');
+  const hasGroup = options.group !== undefined;
+  const hasClear = options.clear === true;
+  if (hasGroup === hasClear) throw new BoardError('--group または --clear のどちらか一方を指定してください');
+  const group = hasGroup ? validateGroupName(options.group, '--group') : undefined;
+  const board = await loadBoard(dir);
+  const items = ids.map((id) => findItem(board, id));
+  for (const item of items) {
+    if (hasGroup) item.group = group;
+    else delete item.group;
+  }
+  await writeBoard(dir, board);
+  if (hasGroup) process.stdout.write(`${ids.join(',')} を「${group}」へ移しました\n`);
+  else process.stdout.write(`${ids.join(',')} の区分を外しました\n`);
+}
+
+function groupOrder(board) {
+  const order = [];
+  const names = new Set();
+  const add = (name) => {
+    if (!names.has(name)) {
+      names.add(name);
+      order.push(name);
+    }
+  };
+  if (Array.isArray(board.groups)) {
+    for (const name of board.groups) add(name);
+  }
+  let hasUngrouped = false;
+  for (const item of board.items) {
+    if (item.group === undefined) {
+      hasUngrouped = true;
+    } else {
+      add(item.group);
+    }
+  }
+  if (hasUngrouped) add('その他');
+  return order;
+}
+
+async function commandGroups(options) {
+  const dir = resolvedDir(options);
+  const board = await loadBoard(dir);
+  if (options.set !== undefined) {
+    let groups;
+    try {
+      groups = JSON.parse(options.set);
+    } catch {
+      throw new BoardError('--set は JSON 配列で指定してください');
+    }
+    if (!Array.isArray(groups)) throw new BoardError('--set は JSON 配列で指定してください');
+    const trimmedGroups = groups.map((group, index) => validateGroupName(group, `groups[${index}]`));
+    const seen = new Set();
+    for (const group of trimmedGroups) {
+      if (seen.has(group)) throw new BoardError(`groups に重複があります: ${group}`);
+      seen.add(group);
+    }
+    if (trimmedGroups.length === 0) delete board.groups;
+    else board.groups = trimmedGroups;
+    await writeBoard(dir, board);
+    process.stdout.write('表示順を保存しました\n');
+    return;
+  }
+  const groups = groupOrder(board);
+  if (options.json) process.stdout.write(`${JSON.stringify(groups)}\n`);
+  else for (const group of groups) process.stdout.write(`${group}\n`);
+}
+
 async function commandClose(options) {
   const dir = resolvedDir(options);
   const id = requireOption(options, 'id');
@@ -489,7 +580,11 @@ async function commandList(options) {
     process.stdout.write(`${JSON.stringify(board.items)}\n`);
     return;
   }
-  for (const item of board.items) process.stdout.write(`${item.id}\t${item.status}\t${item.title}\n`);
+  const hasGroups = board.items.some((item) => Object.hasOwn(item, 'group'));
+  for (const item of board.items) {
+    const line = `${item.id}\t${item.status}\t${item.title}`;
+    process.stdout.write(`${hasGroups ? `${line}\t${item.group ?? 'その他'}` : line}\n`);
+  }
 }
 
 async function commandAnswers(options) {
@@ -906,6 +1001,8 @@ async function main(argv = process.argv.slice(2)) {
     switch (parsed.command) {
       case 'init': return await commandInit(parsed.options);
       case 'add': return await commandAdd(parsed.options);
+      case 'group': return await commandGroup(parsed.options);
+      case 'groups': return await commandGroups(parsed.options);
       case 'read': return await commandRead(parsed.options);
       case 'close': return await commandClose(parsed.options);
       case 'reopen': return await commandReopen(parsed.options);

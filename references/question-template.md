@@ -31,6 +31,19 @@
 
 推奨がある場合は `answer.recommended` に、`value` と同じ形の値を指定します。`choice` は選択肢の `value`、`multi` は値の配列、`rating`・`scale`・`number` は数、`yesno` は `true` または `false` を入れます。`text` 型には指定できません。
 
+## 区分（任意）
+
+item.json のトップレベルに `"group": "<区分>"` を書くと、item を区分できます。区分名は前後の空白を除いて1〜30文字で、`add --group` を指定した場合は item.json の `group` より優先されます。`text_lint.py` は区分名を文面の検査にかけません。
+
+```json
+{
+  "title": "注文アプリの設計を決めるか",
+  "group": "注文アプリの設計",
+  "sections": [],
+  "answer": {"type": "yesno"}
+}
+```
+
 ## 完全な例: choice
 
 ```json
