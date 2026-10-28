@@ -159,6 +159,173 @@ test('CLI と受け口の受入', async () => {
   }
 });
 
+test('表の回答（table）', async () => {
+  const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'bord-board-'));
+  let serverProcess;
+  try {
+    const inboxOutput = path.join(dir, 'inbox.txt');
+    const inboxCode = "require('node:fs').appendFileSync(process.argv[1], process.argv.at(-1) + '\\n---\\n')";
+    const inbox = JSON.stringify([process.execPath, '-e', inboxCode, inboxOutput]);
+    let result = run(['init', '--dir', dir, '--session', '表試験', '--cwd', dir, '--inbox', inbox]);
+    assert.equal(result.status, 0, result.stderr);
+
+    const makeItem = (overrides = {}) => ({
+      title: '表で確認する',
+      sections: [],
+      answer: {
+        type: 'table',
+        columns: ['サービス', '記入欄'],
+        rows: [['Supabase', '初期値'], ['AppSheet', '初期値'], ['Cloudflare', '初期値']],
+        inputLabel: '入力してください',
+        inputPlaceholder: '任意',
+        ...overrides,
+      },
+    });
+    const addItem = async (name, item) => {
+      const itemPath = path.join(dir, `${name}.json`);
+      await fs.writeFile(itemPath, JSON.stringify(item));
+      const addResult = run(['add', '--dir', dir, '--file', itemPath]);
+      assert.equal(addResult.status, 0, addResult.stderr);
+    };
+
+    await addItem('table-1', makeItem());
+    let board = JSON.parse(await fs.readFile(path.join(dir, 'board.json'), 'utf8'));
+    const invalidItems = [
+      makeItem({ rows: [['Supabase', '初期値', '余分']] }),
+      makeItem({ rows: Array.from({ length: 51 }, (_, index) => [`行${index + 1}`, '']) }),
+      makeItem({ columns: Array.from({ length: 7 }, (_, index) => `列${index + 1}`) }),
+      makeItem({ inputLabel: 'あ'.repeat(31) }),
+      makeItem({ rows: [['   ', '初期値'], ['AppSheet', '初期値'], ['Cloudflare', '初期値']] }),
+      makeItem({ recommended: 'Supabase' }),
+    ];
+    for (const [index, item] of invalidItems.entries()) {
+      const itemPath = path.join(dir, `invalid-table-${index}.json`);
+      await fs.writeFile(itemPath, JSON.stringify(item));
+      result = run(['add', '--dir', dir, '--file', itemPath]);
+      assert.notEqual(result.status, 0);
+      board = JSON.parse(await fs.readFile(path.join(dir, 'board.json'), 'utf8'));
+      assert.equal(board.items.length, 1);
+    }
+    await addItem('table-2', makeItem({ inputLabel: 'あ'.repeat(30) }));
+    await addItem('table-3', makeItem());
+    await addItem('table-4', makeItem());
+
+    const server = await startServer(dir);
+    serverProcess = server.child;
+    const port = server.meta.port;
+    let response = await request(port, '/api/answer', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ id: 'q-1', value: ['  abc\nxyz  ', '   ', '  def  '], note: '' }) });
+    assert.equal(response.status, 200, response.body);
+    let responseBody = JSON.parse(response.body);
+    assert.equal(responseBody.notified, 'queued');
+    assert.deepEqual(responseBody.item.response.value, ['abc\nxyz', '', 'def']);
+    const firstAnswers = JSON.parse((await fs.readFile(path.join(dir, 'answers.jsonl'), 'utf8')).trim().split('\n').at(-1));
+    assert.deepEqual(firstAnswers.value, ['abc\nxyz', '', 'def']);
+    const firstInbox = await waitFor(async () => {
+      try {
+        const text = await fs.readFile(inboxOutput, 'utf8');
+        return text.includes('記入 2 / 3 行') ? text : null;
+      } catch {
+        return null;
+      }
+    });
+    assert.match(firstInbox, /記入 2 \/ 3 行\nSupabase: abc xyz\nCloudflare: def/);
+    assert.doesNotMatch(firstInbox, /AppSheet:/);
+
+    response = await request(port, '/api/answer', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ id: 'q-2', value: ['', '', ''], note: '表に入らない答え' }) });
+    assert.equal(response.status, 200, response.body);
+    responseBody = JSON.parse(response.body);
+    assert.deepEqual(responseBody.item.response.value, ['', '', '']);
+    response = await request(port, '/api/answer', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ id: 'q-3', value: null, note: 'null でも送れる' }) });
+    assert.equal(response.status, 200, response.body);
+    responseBody = JSON.parse(response.body);
+    assert.deepEqual(responseBody.item.response.value, ['', '', '']);
+    const inboxAfterNotes = await waitFor(async () => {
+      try {
+        const text = await fs.readFile(inboxOutput, 'utf8');
+        return text.includes('自由記入: 表に入らない答え') && text.includes('自由記入: null でも送れる') ? text : null;
+      } catch {
+        return null;
+      }
+    });
+    assert.match(inboxAfterNotes, /回答: 記入 0 \/ 3 行\n自由記入: 表に入らない答え/);
+
+    const invalidResponses = [
+      { value: ['', '', ''], note: '  ' },
+      { value: null, note: '' },
+      { value: ['', ''], note: '不正' },
+      { value: ['', 1, ''], note: '不正' },
+      { value: ['', '', ''], note: '', byRecommendation: true },
+    ];
+    for (const payload of invalidResponses) {
+      response = await request(port, '/api/answer', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ id: 'q-4', ...payload }) });
+      assert.equal(response.status, 400, response.body);
+    }
+    const answers = (await fs.readFile(path.join(dir, 'answers.jsonl'), 'utf8')).trim().split('\n').map((line) => JSON.parse(line));
+    assert.equal(answers.length, 3);
+  } finally {
+    if (serverProcess && !serverProcess.killed) {
+      serverProcess.kill('SIGTERM');
+      await new Promise((resolve) => serverProcess.once('exit', resolve));
+    }
+    await fs.rm(dir, { recursive: true, force: true });
+  }
+});
+
+test('保存できたら通知を待たずに返す', async () => {
+  const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'bord-board-'));
+  const failedDir = await fs.mkdtemp(path.join(os.tmpdir(), 'bord-board-'));
+  const serverProcesses = [];
+  try {
+    const delayedOutput = path.join(dir, 'delayed-inbox.txt');
+    const delayedCode = "setTimeout(() => require('node:fs').writeFileSync(process.argv[1], process.argv.at(-1)), 2000)";
+    let result = run(['init', '--dir', dir, '--session', '通知試験', '--cwd', dir, '--inbox', JSON.stringify([process.execPath, '-e', delayedCode, delayedOutput])]);
+    assert.equal(result.status, 0, result.stderr);
+    const itemPath = path.join(dir, 'item.json');
+    await fs.writeFile(itemPath, JSON.stringify({ title: '遅い通知', sections: [], answer: { type: 'choice', options: [{ value: 'a', label: '案A' }] } }));
+    result = run(['add', '--dir', dir, '--file', itemPath]);
+    assert.equal(result.status, 0, result.stderr);
+    const server = await startServer(dir);
+    serverProcesses.push(server.child);
+    let stdout = '';
+    server.child.stdout.on('data', (chunk) => { stdout += chunk.toString(); });
+    const started = Date.now();
+    let response = await request(server.meta.port, '/api/answer', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ id: 'q-1', value: 'a', note: '' }) });
+    const responseElapsed = Date.now() - started;
+    assert.equal(response.status, 200, response.body);
+    assert.ok(responseElapsed < 1500, `応答が遅すぎます: ${responseElapsed}ms`);
+    assert.equal((await fs.readFile(path.join(dir, 'answers.jsonl'), 'utf8')).trim().split('\n').length, 1);
+    await assert.rejects(fs.access(delayedOutput));
+    await waitFor(async () => {
+      try { return (await fs.readFile(delayedOutput, 'utf8')).includes('[decision-board]') ? true : null; } catch { return null; }
+    });
+    await waitFor(() => stdout.startsWith('') && stdout.includes('notify q-1 ok '));
+
+    const failedOutput = path.join(failedDir, 'failed-inbox.txt');
+    result = run(['init', '--dir', failedDir, '--session', '失敗通知試験', '--cwd', failedDir, '--inbox', JSON.stringify([process.execPath, '-e', 'process.exit(1)', failedOutput])]);
+    assert.equal(result.status, 0, result.stderr);
+    const failedItemPath = path.join(failedDir, 'item.json');
+    await fs.writeFile(failedItemPath, JSON.stringify({ title: '失敗する通知', sections: [], answer: { type: 'choice', options: [{ value: 'a', label: '案A' }] } }));
+    result = run(['add', '--dir', failedDir, '--file', failedItemPath]);
+    assert.equal(result.status, 0, result.stderr);
+    const failedServer = await startServer(failedDir);
+    serverProcesses.push(failedServer.child);
+    let failedStdout = '';
+    failedServer.child.stdout.on('data', (chunk) => { failedStdout += chunk.toString(); });
+    response = await request(failedServer.meta.port, '/api/answer', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ id: 'q-1', value: 'a', note: '' }) });
+    assert.equal(response.status, 200, response.body);
+    await waitFor(() => failedStdout.includes('notify q-1 failed: exit 1 '));
+  } finally {
+    for (const child of serverProcesses) {
+      if (!child.killed) {
+        child.kill('SIGTERM');
+        await new Promise((resolve) => child.once('exit', resolve));
+      }
+    }
+    await fs.rm(dir, { recursive: true, force: true });
+    await fs.rm(failedDir, { recursive: true, force: true });
+  }
+});
+
 test('自由記入だけの回答と未回答値の受け入れ', async () => {
   const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'bord-board-'));
   let serverProcess;

@@ -26,10 +26,12 @@
 | 進めてよいか | `yesno` | `true` または `false` |
 | いつまでに・何日か | `number` | 数 |
 | 選択肢で表せない判断 | `text` | 自由記入の `note` |
+| 表の行ごとに書いてほしい | `table` | 行と同じ長さの文字列配列（未記入は ""） |
 
 すべての型に自由記入欄が付きます。「その他」を選択肢にはしません。`choice` と `multi` の選択肢は2個以上にします。
 
 推奨がある場合は `answer.recommended` に、`value` と同じ形の値を指定します。`choice` は選択肢の `value`、`multi` は値の配列、`rating`・`scale`・`number` は数、`yesno` は `true` または `false` を入れます。`text` 型には指定できません。
+`table` 型にも指定できません。
 
 ## 区分（任意）
 
@@ -41,6 +43,37 @@ item.json のトップレベルに `"group": "<区分>"` を書くと、item を
   "group": "注文アプリの設計",
   "sections": [],
   "answer": {"type": "yesno"}
+}
+```
+
+## 完全な例: table
+
+```json
+{
+  "title": "既存の仕組みの置き場を記入しますか？",
+  "status": "open",
+  "sections": [
+    {
+      "type": "text",
+      "heading": "今回決めること",
+      "md": "仕組みごとに、分かっていることと確認したいことを整理します。"
+    }
+  ],
+  "answer": {
+    "type": "table",
+    "prompt": "行ごとに右端の回答欄へ書いてください。",
+    "columns": ["仕組み", "分かっていること", "教えてほしいこと"],
+    "rows": [
+      ["Supabase", "作成済み", "プロジェクト ID"],
+      ["AppSheet", "稼働中", "アプリ名"],
+      ["BigQuery", "利用中", "プロジェクト ID"]
+    ],
+    "inputLabel": "回答",
+    "inputPlaceholder": "例: org/sample-repo"
+  },
+  "response": null,
+  "closedAt": null,
+  "closeNote": null
 }
 ```
 

@@ -64,6 +64,7 @@
     .status-mark.answered { color: var(--wa-color-brand); }
     .status-mark.closed { color: var(--board-muted); }
     .status-mark.pasted { color: var(--wa-color-warning); }
+    .status-mark.unconfirmed { color: var(--wa-color-warning); }
     .status-mark.danger { color: var(--wa-color-danger); }
     .row-meta { display: flex; align-items: center; flex-wrap: wrap; gap: 8px; min-width: 0; color: var(--board-muted); font-size: .78rem; white-space: normal; }
     .read-list { display: grid; gap: 8px; }
@@ -90,6 +91,12 @@
     .table-scroll table { min-width: 100%; border-collapse: collapse; }
     th, td { padding: 9px 10px; border: 1px solid var(--board-border); text-align: left; vertical-align: top; overflow-wrap: anywhere; }
     th { background: color-mix(in srgb, var(--board-muted) 9%, var(--board-panel)); }
+    .answer-table th.input-col, .answer-table td.input-cell { min-width: 12em; }
+    .answer-table td.row-head { font-weight: 600; }
+    .answer-table td.input-cell { white-space: pre-wrap; }
+    .table-input { width: 100%; box-sizing: border-box; resize: none; overflow: hidden; font: inherit; color: inherit; background: var(--board-panel); border: 1px solid var(--board-border); border-radius: 6px; padding: 6px 8px; min-height: 2.2em; }
+    .table-input::placeholder { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+    .table-input:focus { outline: 2px solid var(--wa-color-brand); }
     .chart-inner { min-width: 560px; height: 280px; }
     .metric-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; }
     .metric { padding: 12px; border: 1px solid var(--board-border); border-radius: 8px; }
@@ -381,9 +388,11 @@
         return new Intl.DateTimeFormat(undefined, { month: 'numeric', day: 'numeric', hour: '2-digit', minute: '2-digit', hour12: false }).format(date);
       }
       function isFailed(item) { const draft = readDraft(item.id); return item.status === 'open' && draft && draft.state === 'failed'; }
+      function isUnconfirmed(item) { const draft = readDraft(item.id); return item.status === 'open' && draft && draft.state === 'unconfirmed'; }
       function isPasted(item) { const draft = readDraft(item.id); return item.status === 'open' && draft && draft.state === 'pasted'; }
       function statusText(item) {
         if (isFailed(item)) return '送信失敗';
+        if (isUnconfirmed(item)) return '送信未確認';
         if (isPasted(item)) return '回答済み（未送達）';
         if (item.status === 'open') return '未回答';
         if (item.status === 'answered') return '回答済み（閉じ待ち）';
@@ -391,6 +400,7 @@
       }
       function statusClass(item) {
         if (isFailed(item)) return 'danger';
+        if (isUnconfirmed(item)) return 'unconfirmed';
         if (isPasted(item)) return 'pasted';
         return item.status;
       }
@@ -703,6 +713,49 @@
         if (index > 0) app.append(divider());
         app.append(wrapper);
       }
+      function resizeTableInput(input) {
+        if (input.value === '') {
+          input.style.height = '';
+          return;
+        }
+        input.style.height = 'auto';
+        input.style.height = `${input.scrollHeight}px`;
+      }
+      function tableValues(answer, value) {
+        const rows = Array.isArray(answer.rows) ? answer.rows : [];
+        return rows.map((row, index) => Array.isArray(value) && typeof value[index] === 'string' ? value[index] : '');
+      }
+      function tableSummary(answer, value) {
+        const rows = Array.isArray(answer.rows) ? answer.rows : [];
+        const values = tableValues(answer, value);
+        const entries = values.flatMap((part, index) => {
+          const trimmed = part.trim();
+          if (!trimmed) return [];
+          return [`${rows[index][0]}: ${trimmed.replace(/\r\n|\n|\r/g, ' ')}`];
+        });
+        return `回答: 記入 ${entries.length} / ${rows.length} 行${entries.length ? `\n${entries.join('\n')}` : ''}`;
+      }
+      function tableResponseTable(answer, value) {
+        const scroll = node('div', null, 'table-scroll answer-table');
+        const table = document.createElement('table');
+        const thead = document.createElement('thead');
+        const headerRow = document.createElement('tr');
+        for (const column of Array.isArray(answer.columns) ? answer.columns : []) headerRow.append(node('th', column));
+        const inputLabel = typeof answer.inputLabel === 'string' && answer.inputLabel.trim() ? answer.inputLabel.trim() : '回答';
+        headerRow.append(node('th', inputLabel, 'input-col'));
+        thead.append(headerRow);
+        const tbody = document.createElement('tbody');
+        const values = tableValues(answer, value);
+        for (const [index, row] of (Array.isArray(answer.rows) ? answer.rows : []).entries()) {
+          const tr = document.createElement('tr');
+          row.forEach((cell, cellIndex) => tr.append(node('td', cell, cellIndex === 0 ? 'row-head' : undefined)));
+          tr.append(node('td', values[index], 'input-cell'));
+          tbody.append(tr);
+        }
+        table.append(thead, tbody);
+        scroll.append(table);
+        return scroll;
+      }
       function optionControl(answer, draft) {
         const wrap = node('div', null, 'answer-control');
         let control;
@@ -747,6 +800,36 @@
           if (answer.max !== undefined) control.setAttribute('max', String(answer.max));
           if (answer.unit) control.setAttribute('label', answer.unit);
           if (draft && draft.value != null) control.value = draft.value;
+        } else if (answer.type === 'table') {
+          control = document.createElement('table');
+          const scroll = node('div', null, 'table-scroll answer-table');
+          const thead = document.createElement('thead');
+          const headerRow = document.createElement('tr');
+          for (const column of Array.isArray(answer.columns) ? answer.columns : []) headerRow.append(node('th', column));
+          const inputLabel = typeof answer.inputLabel === 'string' && answer.inputLabel.trim() ? answer.inputLabel.trim() : '回答';
+          headerRow.append(node('th', inputLabel, 'input-col'));
+          thead.append(headerRow);
+          const tbody = document.createElement('tbody');
+          const draftValues = Array.isArray(draft?.value) && draft.value.length === (answer.rows || []).length ? draft.value : [];
+          for (const [index, row] of (Array.isArray(answer.rows) ? answer.rows : []).entries()) {
+            const tr = document.createElement('tr');
+            row.forEach((cell, cellIndex) => tr.append(node('td', cell, cellIndex === 0 ? 'row-head' : undefined)));
+            const inputCell = node('td', null, 'input-cell');
+            const input = document.createElement('textarea');
+            input.rows = 1;
+            input.className = 'table-input';
+            input.setAttribute('aria-label', `${row[0]}の${inputLabel}`);
+            if (typeof answer.inputPlaceholder === 'string') input.setAttribute('placeholder', answer.inputPlaceholder);
+            if (draftValues.length) input.value = draftValues[index];
+            input.addEventListener('input', () => resizeTableInput(input));
+            inputCell.append(input);
+            tr.append(inputCell);
+            tbody.append(tr);
+          }
+          control.append(thead, tbody);
+          scroll.append(control);
+          wrap.append(scroll);
+          return { wrap, control };
         } else {
           return null;
         }
@@ -776,6 +859,10 @@
         }
         if (answer.type === 'scale') return formState.scaleTouched ? Number(control.value) : null;
         if (answer.type === 'number') return control.value === '' || control.value == null ? null : Number(control.value);
+        if (answer.type === 'table') {
+          const value = [...control.querySelectorAll('textarea.table-input')].map((input) => input.value);
+          return value.some((part) => part.trim() !== '') ? value : null;
+        }
         return null;
       }
       function formNote(formState) { return formState.note.value || ''; }
@@ -793,6 +880,7 @@
         if (answer.type === 'scale') return formState.scaleTouched;
         if (answer.type === 'yesno') return value === true || value === false;
         if (answer.type === 'number') return typeof value === 'number' && Number.isFinite(value) && (answer.min === undefined || value >= answer.min) && (answer.max === undefined || value <= answer.max);
+        if (answer.type === 'table') return true;
         return note.trim() !== '';
       }
       function hasAnswerValue(formState) {
@@ -834,6 +922,11 @@
           formState.control.value = answer.min;
         } else if (answer.type === 'number') {
           formState.control.value = '';
+        } else if (answer.type === 'table') {
+          formState.control.querySelectorAll('textarea.table-input').forEach((input) => {
+            input.value = '';
+            resizeTableInput(input);
+          });
         } else if (answer.type === 'text') {
           formState.note.value = '';
         }
@@ -844,7 +937,14 @@
         const value = item.response ? item.response.value : localDraft?.value;
         const note = item.response ? item.response.note : localDraft?.note || '';
         view.append(node('div', statusText(item), `status-mark ${statusClass(item)}`));
-        view.append(node('div', responseValueText(item, value), 'response-value'));
+        if (item.answer.type === 'table') {
+          const values = tableValues(item.answer, value);
+          const count = values.filter((part) => part.trim() !== '').length;
+          view.append(node('div', `記入 ${count} / ${(item.answer.rows || []).length} 行`, 'response-value'));
+          view.append(tableResponseTable(item.answer, value));
+        } else {
+          view.append(node('div', responseValueText(item, value), 'response-value'));
+        }
         view.append(node('div', note.trim() ? note : '自由記入: なし', 'response-note'));
         if (item.response) {
           const command = board.board.commands.close.replaceAll('{id}', item.id);
@@ -870,6 +970,9 @@
           const draft = readDraft(item.id);
           if (draft?.state === 'failed') {
             answerBox.append(node('div', `前回の送信は失敗しました: ${draft.error || '送信に失敗しました'}（${dateText(draft.failedAt)}）`, 'callout danger'));
+          }
+          if (draft?.state === 'unconfirmed') {
+            answerBox.append(node('div', `前回の送信は確認できていません（受け口の応答がありませんでした・${dateText(draft.failedAt)}）。届いていれば、再読込で回答済みに変わります。変わらなければ、もう一度送ってください。`, 'callout warning'));
           }
           if (item.answer.prompt) answerBox.append(node('p', item.answer.prompt, 'answer-prompt'));
           if (item.answer.recommended !== undefined) {
@@ -905,11 +1008,13 @@
             });
           }
           app.append(answerBox);
+          if (item.answer.type === 'table') window.requestAnimationFrame(() => answerBox.querySelectorAll('textarea.table-input').forEach(resizeTableInput));
           window.currentForm = controlInfo;
         }
       }
       function responseValueText(item, value) {
         const answer = item.answer;
+        if (answer.type === 'table') return tableSummary(answer, value);
         if (value == null && answer.type !== 'text') return '回答: 選択なし（自由記入のみ）';
         if (answer.type === 'choice') return `回答: ${answer.options.find((option) => option.value === value)?.label || String(value ?? '')}`;
         if (answer.type === 'multi') return `回答: ${(Array.isArray(value) ? value : []).map((part) => answer.options.find((option) => option.value === part)?.label || String(part)).join('、')}`;
@@ -1057,7 +1162,7 @@
         const storageAvailable = Boolean(getStorage());
         for (const item of board.items || []) {
           const draft = storageAvailable ? readDraft(item.id) : null;
-          const failedLocal = item.status === 'open' && draft?.state === 'failed';
+          const failedLocal = item.status === 'open' && (draft?.state === 'failed' || draft?.state === 'unconfirmed');
           const record = localJsonRecord(item, draft);
           if (failedLocal) failed.push(record);
           else if (item.status !== 'closed') notClosed.push(record);
@@ -1093,6 +1198,28 @@
         content.replaceChildren(wrapper);
         dialog.open = true;
       }
+      function isRelayStatus(status) {
+        return status === 502 || status === 503 || status === 504 || (status >= 520 && status <= 527);
+      }
+      async function recheckDelivered(itemId) {
+        const controller = new AbortController();
+        const timeoutId = setTimeout(() => controller.abort(), 10000);
+        try {
+          const response = await fetch('./board.json', { cache: 'no-store', signal: controller.signal });
+          if (!response.ok) return null;
+          const incoming = await response.json();
+          board = incoming;
+          serverReachable = true;
+          offline = false;
+          cleanClosedDrafts();
+          const item = (board.items || []).find((candidate) => candidate.id === itemId);
+          return item ? item.status !== 'open' : null;
+        } catch {
+          return null;
+        } finally {
+          clearTimeout(timeoutId);
+        }
+      }
       async function submitAnswer(item, formState) {
         if (submitting !== null || !formState) return;
         const byRecommendation = isRecommendationMode(formState);
@@ -1125,6 +1252,21 @@
               render();
               return;
             }
+            if (isRelayStatus(response.status)) {
+              const delivered = await recheckDelivered(item.id);
+              if (delivered === true) {
+                removeDraft(item.id);
+                submitting = null;
+                showToast('届いていました（応答が遅れました）');
+                if (nextBeforeUpdate) go(`#/q/${encodeURIComponent(nextBeforeUpdate.id)}`); else go('#/list/decisions');
+                return;
+              }
+              saveDraft(item, value, note, 'unconfirmed', { failedAt: new Date().toISOString(), error: '受け口の応答がありませんでした' });
+              submitting = null;
+              render();
+              showToast('応答がありません。届いたかは再読込で確認してください');
+              return;
+            }
             const reason = responseError ? `HTTP ${response.status}: ${responseError}` : `HTTP ${response.status}`;
             saveFailedDraft(item, value, note, reason);
             submitting = null;
@@ -1145,16 +1287,24 @@
           const current = board.items.find((candidate) => candidate.id === item.id);
           if (current) Object.assign(current, result.item);
           removeDraft(item.id);
-          showToast(result.notified === true ? '送りました（エージェントに知らせ済み）' : result.notified === null ? '送りました（知らせる設定なし）' : '送りました（知らせに失敗しました）');
+          showToast(result.notified === 'queued' ? '送りました（エージェントへ知らせています）' : result.notified === true ? '送りました（エージェントに知らせ済み）' : result.notified === null ? '送りました（知らせる設定なし）' : '送りました（知らせに失敗しました）');
           submitting = null;
           if (nextBeforeUpdate) go(`#/q/${encodeURIComponent(nextBeforeUpdate.id)}`); else go('#/list/decisions');
         } catch (error) {
           const aborted = error?.name === 'AbortError';
           if (aborted) {
-            saveFailedDraft(item, value, note, '受け口が応答しません');
+            const delivered = await recheckDelivered(item.id);
+            if (delivered === true) {
+              removeDraft(item.id);
+              submitting = null;
+              showToast('届いていました（応答が遅れました）');
+              if (nextBeforeUpdate) go(`#/q/${encodeURIComponent(nextBeforeUpdate.id)}`); else go('#/list/decisions');
+              return;
+            }
+            saveDraft(item, value, note, 'unconfirmed', { failedAt: new Date().toISOString(), error: '受け口の応答がありませんでした' });
             submitting = null;
             render();
-            showToast('受け口が応答しません');
+            showToast('応答がありません。届いたかは再読込で確認してください');
             return;
           }
           const message = buildLocalMessage(item, formState, byRecommendation);

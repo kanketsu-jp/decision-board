@@ -42,6 +42,13 @@ node <skill>/scripts/board.mjs init --dir .temp/bord --session "<セッション
 | 進めてよいか | `yesno` | `true` または `false` |
 | いつまでに・何日か | `number` | 数 |
 | 選択肢で表せない判断 | `text` | 自由記入の `note` |
+| 表の行ごとに書いてほしい | `table` | 行と同じ長さの文字列配列（未記入は ""） |
+
+`table` は `columns`（1〜6個の空でない文字列）と `rows`（各行が同じ長さの文字列配列）を指定します。各行の1列目は空にできず、行の右端に記入欄が付きます。
+`rows` は1〜50行にし、各行の文字列数を `columns` とそろえます。
+記入欄の名前は任意の `inputLabel`（1〜30文字）、薄い見本文字は任意の `inputPlaceholder`（200文字まで）で指定します。`recommended` は指定できません。
+表に1行以上記入するか、表の下の自由記入欄に書けば送信できます。自由記入だけなら `value` は空文字列の配列です。
+受信箱では「回答: 記入 N / M 行」の下に、記入のあった行だけを「1列目: 記入」の形で表示します。記入の中の改行は半角空白になります。
 
 ```sh
 python3 <skill>/scripts/text_lint.py --item item.json
@@ -81,6 +88,9 @@ node <skill>/scripts/board.mjs serve --dir .temp/bord --open
 ```
 
 受け口は `127.0.0.1` だけで待ち受けます。外（トンネル）から開くときは、トンネルで受け口のポートを公開し、その URL を `serve --public-url <URL>` で渡します。指定した URL 以外の Host / Origin は 403 のままです。公開した URL には認証（例: アクセス制御サービス）をかけることを勧めます。チャットに残すのは結論 1 行と URL です。
+
+受け口は回答を保存できた時点で先に応答し、エージェントへの通知はその後に行います。通知の結果は `serve` の標準出力に1行で記録されます。
+成功は `notify <id> ok <ISO 時刻> <ms>ms`、失敗は `notify <id> failed: <理由> <ISO 時刻> <ms>ms` です。画面で30秒確認できない場合は「確認できていません」と表示します。
 
 ## 回答が届いたら
 

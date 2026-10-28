@@ -218,6 +218,8 @@ function answerValueReason(answer, value) {
     if (value !== true && value !== false) return 'はい・いいえの値が不正です';
   } else if (answer.type === 'number') {
     if (typeof value !== 'number' || !Number.isFinite(value) || (answer.min !== undefined && value < answer.min) || (answer.max !== undefined && value > answer.max)) return '数値が不正です';
+  } else if (answer.type === 'table') {
+    if (!Array.isArray(value) || value.length !== answer.rows.length || value.some((part) => typeof part !== 'string' || part.length > MAX_NOTE)) return '表の回答が不正です';
   } else {
     return '自由記入型には値を指定できません';
   }
@@ -297,7 +299,7 @@ function validateSections(sections) {
 }
 
 function validateAnswer(answer) {
-  if (!isObject(answer) || !['choice', 'multi', 'rating', 'scale', 'yesno', 'number', 'text'].includes(answer.type)) {
+  if (!isObject(answer) || !['choice', 'multi', 'rating', 'scale', 'yesno', 'number', 'text', 'table'].includes(answer.type)) {
     throw new BoardError('answer.type が不正です');
   }
   if (answer.prompt !== undefined) requireString(answer.prompt, 'answer.prompt');
@@ -330,7 +332,27 @@ function validateAnswer(answer) {
     for (const field of ['min', 'max']) if (answer[field] !== undefined && (typeof answer[field] !== 'number' || !Number.isFinite(answer[field]))) throw new BoardError(`number.${field} が不正です`);
     if (answer.min !== undefined && answer.max !== undefined && answer.min > answer.max) throw new BoardError('number.min と max が不正です');
     if (answer.unit !== undefined) requireString(answer.unit, 'number.unit', { empty: true });
+  } else if (answer.type === 'table') {
+    if (!Array.isArray(answer.columns) || answer.columns.length < 1 || answer.columns.length > 6 || answer.columns.some((column) => typeof column !== 'string' || column.trim() === '')) {
+      throw new BoardError('answer.columns は 1〜6 個の文字列にしてください');
+    }
+    if (!Array.isArray(answer.rows) || answer.rows.length < 1 || answer.rows.length > 50) {
+      throw new BoardError('answer.rows は 1〜50 行にしてください');
+    }
+    for (const row of answer.rows) {
+      if (!Array.isArray(row) || row.length !== answer.columns.length || row.some((cell) => typeof cell !== 'string')) {
+        throw new BoardError('answer.rows は columns と同じ長さの文字列配列にしてください');
+      }
+      if (row[0].trim() === '') throw new BoardError('answer.rows の 1 列目は空にできません');
+    }
+    if (answer.inputLabel !== undefined && (typeof answer.inputLabel !== 'string' || [...answer.inputLabel.trim()].length < 1 || [...answer.inputLabel.trim()].length > 30)) {
+      throw new BoardError('answer.inputLabel は trim 後が 1〜30 文字の文字列にしてください');
+    }
+    if (answer.inputPlaceholder !== undefined && (typeof answer.inputPlaceholder !== 'string' || [...answer.inputPlaceholder].length > 200)) {
+      throw new BoardError('answer.inputPlaceholder は 200 文字以内の文字列にしてください');
+    }
   }
+  if (answer.type === 'table' && answer.recommended !== undefined) throw new BoardError('answer.recommended は table では指定できません');
   if (answer.recommended !== undefined) {
     if (answer.type === 'multi' && Array.isArray(answer.recommended) && answer.recommended.length === 0) {
       throw new BoardError('answer.recommended が不正です: 空配列は指定できません');
@@ -677,6 +699,17 @@ function allowedOrigin(origin, port, publicUrls = []) {
 
 function responseValueText(item, value) {
   const answer = item.answer;
+  if (answer.type === 'table') {
+    const values = Array.isArray(value) ? value : [];
+    const entered = [];
+    for (const [index, row] of answer.rows.entries()) {
+      const cell = values[index];
+      if (typeof cell === 'string' && cell.trim() !== '') {
+        entered.push(`${row[0]}: ${cell.replace(/\r\n|\n|\r/g, ' ')}`);
+      }
+    }
+    return [`記入 ${entered.length} / ${answer.rows.length} 行`, ...entered].join('\n');
+  }
   if (value == null && answer.type !== 'text') return '選択なし（自由記入のみ）';
   if (answer.type === 'choice') return answer.options.find((option) => option.value === value)?.label ?? String(value);
   if (answer.type === 'multi') return (Array.isArray(value) ? value : []).map((part) => answer.options.find((option) => option.value === part)?.label ?? String(part)).join('、');
@@ -699,6 +732,12 @@ function responseReason(item, value, note) {
   if (answer.type === 'text') {
     if (note.trim() === '') return '自由記入を入力してください';
     return null;
+  }
+  if (answer.type === 'table') {
+    if (value === null || value === undefined) return note.trim() === '' ? '表に 1 行以上記入するか、自由記入を書いてください' : null;
+    const reason = answerValueReason(answer, value);
+    if (reason) return reason;
+    return value.some((cell) => cell.trim() !== '') || note.trim() !== '' ? null : '表に 1 行以上記入するか、自由記入を書いてください';
   }
   if (value === null || value === undefined) return note.trim() === '' ? '回答か自由記入を入力してください' : null;
   return answerValueReason(answer, value);
@@ -754,6 +793,23 @@ function notifyInbox(inbox, message) {
     } catch (error) {
       finish({ notified: false, notifyError: error.message });
     }
+  });
+}
+
+function notifyAfterResponse(inbox, itemId, message) {
+  if (!inbox) return;
+  setImmediate(() => {
+    const notifyStarted = Date.now();
+    const logResult = (notification) => {
+      const elapsed = Date.now() - notifyStarted;
+      const timestamp = new Date().toISOString();
+      try {
+        process.stdout.write(notification.notified ? `notify ${itemId} ok ${timestamp} ${elapsed}ms\n` : `notify ${itemId} failed: ${notification.notifyError} ${timestamp} ${elapsed}ms\n`);
+      } catch {}
+    };
+    Promise.resolve().then(() => notifyInbox(inbox, message)).then(logResult).catch((error) => {
+      logResult({ notified: false, notifyError: error.message || '内部エラーです' });
+    });
   });
 }
 
@@ -845,7 +901,9 @@ function makeServer(dir, publicUrls = []) {
             const reason = responseReason(item, payload.value, note);
             if (reason) throw jsonError(reason, 400);
             const answeredAt = now();
-            const value = item.answer.type === 'text' || payload.value == null ? null : payload.value;
+            const value = item.answer.type === 'table'
+              ? (Array.isArray(payload.value) ? payload.value.map((cell) => cell.trim()) : Array(item.answer.rows.length).fill(''))
+              : item.answer.type === 'text' || payload.value == null ? null : payload.value;
             const message = answerMessage(board, item, value, note, answeredAt, byRecommendation);
             item.response = { value, note, answeredAt, via: 'server' };
             if (byRecommendation) item.response.byRecommendation = true;
@@ -861,9 +919,9 @@ function makeServer(dir, publicUrls = []) {
             if (byRecommendation) answerRecord.byRecommendation = true;
             await appendJsonLine(path.join(dir, 'answers.jsonl'), answerRecord);
             await writeBoard(dir, board);
-            const notification = await notifyInbox(board.board.inbox, message);
-            const response = { ok: true, item, ...notification, message, closeCommand: closeCommand(board, item.id) };
+            const response = { ok: true, item, notified: board.board.inbox ? 'queued' : null, message, closeCommand: closeCommand(board, item.id) };
             replyJson(200, response);
+            notifyAfterResponse(board.board.inbox, item.id, message);
           } catch (error) {
             const status = error.httpStatus ?? 500;
             replyJson(status, { error: error.message || '内部エラーです' });

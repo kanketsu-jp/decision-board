@@ -15,6 +15,22 @@ const baseItem = {
   answer: { type: 'yesno' },
 };
 
+const tableItem = {
+  title: '仕組みごとの回答を集めるか決めますか？',
+  sections: [{ type: 'text', md: '仕組みごとに回答を書いてください。' }],
+  answer: {
+    type: 'table',
+    prompt: '行ごとに回答してください。',
+    columns: ['仕組み', '分かっていること', '教えてほしいこと'],
+    rows: [
+      ['Supabase', '作成済み', 'プロジェクト ID'],
+      ['AppSheet', '稼働中', 'アプリ名'],
+    ],
+    inputLabel: '回答',
+    inputPlaceholder: '例: org/sample-repo',
+  },
+};
+
 async function runLint(item) {
   const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'bord-lint-'));
   const itemPath = path.join(dir, 'item.json');
@@ -53,4 +69,24 @@ test('group に文面ならエラーになる文字列を置いても lint は�
     group: '回答は不要です',
   });
   assert.equal(groupResult.status, 0, groupResult.stderr);
+});
+
+test('table 型の item は lint のエラー 0 件になる', async () => {
+  const result = await runLint(tableItem);
+  assert.equal(result.status, 0, result.stderr);
+});
+
+test('table 型の answer.rows の文字列も文面の lint 対象になる', async () => {
+  const result = await runLint({
+    ...tableItem,
+    answer: {
+      ...tableItem.answer,
+      rows: tableItem.answer.rows.map((row, index) => (
+        index === 0 ? [...row.slice(0, 2), '回答は不要です'] : row
+      )),
+    },
+  });
+  assert.equal(result.status, 1, result.stdout);
+  assert.match(result.stdout, /item\.answer\.rows\[0\]\[2\]/);
+  assert.match(result.stdout, /answer_not_required|回答は不要/);
 });

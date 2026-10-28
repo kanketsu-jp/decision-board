@@ -86,7 +86,7 @@ BOARD_EXCLUDED_KEYS = {
     "id", "status", "type", "variant", "value", "createdAt",
     "answeredAt", "closedAt", "key", "group",
 }
-BOARD_ANSWER_TYPES = {"choice", "multi", "rating", "scale", "yesno", "number", "text"}
+BOARD_ANSWER_TYPES = {"choice", "multi", "rating", "scale", "yesno", "number", "text", "table"}
 
 
 class BoardInputError(Exception):
@@ -197,7 +197,7 @@ def _lint_board_item(item: Any, root: str):
             answer_type_path,
             "error",
             "invalid_answer_type",
-            "answer.type は choice / multi / rating / scale / yesno / number / text のいずれかにしてください。",
+            "answer.type は choice / multi / rating / scale / yesno / number / text / table のいずれかにしてください。",
         ))
 
     if answer_type in {"choice", "multi"}:
