@@ -935,9 +935,11 @@
       function responseDisplay(item, localDraft) {
         const view = node('div', null, 'response-view');
         const value = item.response ? item.response.value : localDraft?.value;
-        const note = item.response ? item.response.note : localDraft?.note || '';
+        const note = (item.response ? item.response.note : localDraft?.note || '') ?? '';
         view.append(node('div', statusText(item), `status-mark ${statusClass(item)}`));
-        if (item.answer.type === 'table') {
+        if (item.status === 'closed' && item.response == null) {
+          view.append(node('div', '回答なしで閉じました', 'response-value'));
+        } else if (item.answer.type === 'table') {
           const values = tableValues(item.answer, value);
           const count = values.filter((part) => part.trim() !== '').length;
           view.append(node('div', `記入 ${count} / ${(item.answer.rows || []).length} 行`, 'response-value'));
@@ -945,8 +947,10 @@
         } else {
           view.append(node('div', responseValueText(item, value), 'response-value'));
         }
-        view.append(node('div', note.trim() ? note : '自由記入: なし', 'response-note'));
-        if (item.response) {
+        if (!(item.status === 'closed' && item.response == null)) {
+          view.append(node('div', note.trim() ? note : '自由記入: なし', 'response-note'));
+        }
+        if (item.response && item.status === 'answered') {
           const command = board.board.commands.close.replaceAll('{id}', item.id);
           const line = node('div', null, 'command-line');
           line.append(node('code', command));
@@ -954,6 +958,9 @@
           copy.value = command;
           line.append(copy);
           view.append(node('div', '反映後に閉じてください。', 'note-label'), line);
+        }
+        if (item.status === 'closed' && typeof item.closeNote === 'string' && item.closeNote.trim()) {
+          view.append(node('div', `閉じたときのメモ: ${item.closeNote}`, 'response-note'));
         }
         return view;
       }
@@ -966,6 +973,7 @@
         const pasted = isPasted(item);
         if (item.status !== 'open' || pasted) {
           answerBox.append(responseDisplay(item, pasted ? readDraft(item.id) : null));
+          app.append(answerBox);
         } else {
           const draft = readDraft(item.id);
           if (draft?.state === 'failed') {
