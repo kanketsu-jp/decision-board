@@ -9,7 +9,7 @@
 ヘッダにセッション名、作業パス、回答済み件数のバッジを表示します。中身には判断の説明、比較、回答欄を表示します。フッタには一覧、前へ、次へ、送信を置きます。
 
 一覧には「判断」と「よみもの」のタブがあります。判断の一覧では回答済みも確認でき、よみものは Markdown を HTML に変換して表示します。
-区分付きの判断がある場合は、判断の一覧が区分ごとの折りたたみに分かれます。区分は既定で開いており、よみものは区分しません。
+区分付きの判断がある場合は、判断の一覧が区分ごとの折りたたみに分かれます。区分は既定で開いています。よみものは区分しません。
 
 ### 回答の型
 
@@ -36,8 +36,9 @@ npx skills add <owner>/decision-board
 
 ## 同梱の単体 Skill
 
-文章の推敲・要約には、同梱の単体 Skill を使えます。
-導入は `npx skills add <owner>/decision-board --skill clear-japanese` です。
+日本語の文章を書く・直す・短くする・要約するときは、同梱の単体 Skill「clear-japanese」を使えます。clear-japanese は yomiyasu（MIT）と nihongo（MIT）を元にしています。
+導入するコマンドは `npx skills add <owner>/decision-board --skill clear-japanese` です。
+使い方は [skills/clear-japanese/README.md](skills/clear-japanese/README.md) にあります。
 
 ## 使い方
 
@@ -54,7 +55,7 @@ npx skills add <owner>/decision-board
 トンネル経由で開くときは `serve --public-url https://board.example.test --open` のように指定します。
 指定した公開 URL 以外の Host / Origin は 403 のままです。公開 URL には認証をかけてください。
 
-デモは次のコマンドです。
+デモは次のコマンドで実行します。
 
 ```sh
 node examples/demo.mjs --open
@@ -77,6 +78,7 @@ node examples/demo.mjs --open
 - DOMPurify 3.4.16
 - Chart.js 4.5.1（CDN・版固定）
 - yomiyasu（MIT、`THIRD_PARTY_NOTICES.md`）
+- nihongo（MIT、`THIRD_PARTY_NOTICES.md`）
 
 ## 試験
 

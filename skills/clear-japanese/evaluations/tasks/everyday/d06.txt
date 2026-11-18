@@ -1,0 +1,1 @@
+このエラー何？ TypeError: 'NoneType' object is not subscriptable
